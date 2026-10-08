@@ -1,0 +1,41 @@
+<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;max-width:1000px;margin:1.5rem auto;padding:0 1rem}label{display:block;margin:.4rem 0}textarea,input:not([type=checkbox]){width:100%;box-sizing:border-box;padding:.3rem}input[type=number]{width:6rem}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:.25rem .5rem;text-align:left}.row input,.row select{width:auto}button{cursor:pointer;padding:.3rem .8rem}</style>
+<h1>Administration</h1>
+<p><select id="sel" onchange="load()"></select> <button onclick="newExp()">+ Nouvelle expérience</button></p><div id="main"></div>
+<script>
+const $=s=>document.querySelector(s);let EX=[],cur=null;
+const j=(u,m='GET',b)=>fetch(u,{method:m,headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined}).then(r=>r.json());
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function list(){EX=await j('/api/admin/experiments');$('#sel').innerHTML=EX.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('');if(cur&&EX.find(e=>e.id===cur))$('#sel').value=cur;EX.length?load():$('#main').innerHTML='';}
+async function newExp(){const n=prompt("Nom de l'expérience ?");if(!n)return;cur=(await j('/api/admin/experiments','POST',{name:n})).id;list();}
+async function load(){
+  const id=cur=+$('#sel').value,e=EX.find(x=>x.id===id),d=await j('/api/admin/experiments/'+id);
+  $('#main').innerHTML=`<h2>Paramètres</h2>
+<p>Lien participants : <a href="/?e=${id}" target="_blank">${location.origin}/?e=${id}</a> · <a href="/api/admin/experiments/${id}/export.csv">Exporter les réponses (CSV)</a> · Sessions terminées : ${d.sessions.done} / ${d.sessions.total}</p>
+<label>Nom <input id="nm" value="${esc(e.name)}"></label>
+<label><input type="checkbox" id="ac" ${e.active?'checked':''}> Expérience active</label>
+<label>Vidéos par participant (hors pièges) <input id="nv" type="number" value="${e.n_videos}"></label>
+<label>Vidéos pièges par participant <input id="na" type="number" value="${e.n_attention}"></label>
+<label>Consignes<textarea id="in" rows="6">${esc(e.instructions)}</textarea></label>
+<label>Questions de compréhension (JSON : q, options, correct = index de la bonne réponse)<textarea id="co" rows="7">${esc(JSON.stringify(e.comprehension,null,1))}</textarea></label>
+<button onclick="save()">Enregistrer</button> <button onclick="del()">Supprimer l'expérience</button>
+<h2>Questions posées après chaque vidéo</h2>
+<ol>${d.questions.map(q=>`<li>[${q.kind}${q.kind=='likert'?' '+q.scale+' pts':''}] ${esc(q.text)} (${esc(q.left_label)} → ${esc(q.right_label)}) <button onclick="rm('questions',${q.id})">✕</button></li>`).join('')}</ol>
+<p class="row"><select id="qk"><option value="likert">Likert</option><option value="slider">Slider</option></select> <input id="qt" placeholder="Texte" style="width:30%"> <input id="ql" placeholder="Libellé gauche" style="width:15%"> <input id="qr" placeholder="Libellé droite" style="width:15%"> <input id="qs" type="number" value="7" style="width:4rem" title="Points Likert"> <button onclick="addQ()">Ajouter</button></p>
+<small>Les vidéos pièges sont validées sur la 1re question Likert.</small>
+<h2>Vidéos (${d.videos.length})</h2>
+<table><tr><th>YouTube</th><th>Capacité</th><th>Genre</th><th>Tâche</th><th>Transcript</th><th>Piège</th><th>Assignées</th><th>Réponses</th><th>Pièges OK</th><th></th></tr>
+${d.videos.map(v=>`<tr><td><a href="https://youtu.be/${v.yt}" target="_blank">${v.yt}</a></td><td>${esc(v.ability)}</td><td>${esc(v.gender)}</td><td>${esc(v.task)}</td><td>${esc(v.transcript)}</td><td>${v.attention?'attendu : '+v.expected:''}</td><td>${v.assigned}</td><td>${v.answered}</td><td>${v.attention?v.att_ok:''}</td><td><button onclick="rm('videos',${v.id})">✕</button></td></tr>`).join('')}</table>
+<h3>Ajouter des vidéos (une par ligne)</h3>
+<small>url;capacité;genre;tâche;transcript[;réponse attendue Likert (= vidéo piège);consigne affichée]</small>
+<textarea id="vt" rows="5" placeholder="https://youtu.be/XXXXXXXXXXX;High;F;QA;neutre&#10;https://youtu.be/YYYYYYYYYYY;Low;M;Navigation;F;2;Pour cette vidéo, répondez 2 à la première question"></textarea>
+<button onclick="addV()">Ajouter</button>`;
+}
+async function save(){let c;try{c=JSON.parse($('#co').value);}catch(e){return alert('JSON de compréhension invalide');}
+  await j('/api/admin/experiments/'+cur,'PUT',{name:$('#nm').value,active:$('#ac').checked,n_videos:+$('#nv').value,n_attention:+$('#na').value,instructions:$('#in').value,comprehension:c});alert('Enregistré');list();}
+async function del(){if(confirm('Supprimer cette expérience et toutes ses données ?')){await j('/api/admin/experiments/'+cur,'DELETE');cur=null;list();}}
+async function addQ(){if(!$('#qt').value)return;await j(`/api/admin/experiments/${cur}/questions`,'POST',{kind:$('#qk').value,text:$('#qt').value,left_label:$('#ql').value,right_label:$('#qr').value,scale:+$('#qs').value});load();}
+async function addV(){const r=await j(`/api/admin/experiments/${cur}/videos`,'POST',{text:$('#vt').value});if(r.bad.length)alert(r.added+' ajoutée(s). Lignes invalides :\n'+r.bad.join('\n'));load();}
+async function rm(k,id){if(confirm('Supprimer ?')){await j(`/api/admin/${k}/${id}`,'DELETE');load();}}
+list();
+</script></html>

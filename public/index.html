@@ -1,0 +1,51 @@
+<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Étude</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;color:#222}button{padding:.6rem 1.2rem;font-size:1rem;cursor:pointer}.q{margin:1.4rem 0}.lk{display:flex;gap:4px}.lk label{text-align:center;flex:1}.ends{display:flex;justify-content:space-between;font-size:.85rem;color:#666}input[type=range]{width:100%}#yt{width:100%;aspect-ratio:16/9}.hide{display:none}progress{width:100%}</style>
+<h1 id="title"></h1><div id="app"></div>
+<script>
+const $=s=>document.querySelector(s),app=$('#app'),eid=new URLSearchParams(location.search).get('e');
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const api=(u,b)=>fetch(u,b?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}:{}).then(r=>r.json());
+let E,S,ix=0,attempts=1,audioOk=false,ended=false,player;
+async function init(){
+  if(!eid){const l=await api('/api/public');return app.innerHTML=l.length?l.map(x=>`<p><a href="?e=${x.id}">${esc(x.name)}</a></p>`).join(''):'Aucune expérience active.';}
+  E=await api('/api/public/'+eid);if(!E.id)return app.textContent='Expérience introuvable.';
+  $('#title').textContent=E.name;intro();
+}
+function intro(){app.innerHTML=`<div style="white-space:pre-wrap">${esc(E.instructions)}</div><p><button id="b">Continuer</button></p>`;$('#b').onclick=()=>audio();}
+function beep(n){const c=new(window.AudioContext||window.webkitAudioContext)();for(let i=0;i<n;i++){const o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=660;g.gain.value=.3;o.start(c.currentTime+i*.6);o.stop(c.currentTime+i*.6+.3);}}
+function audio(msg=''){
+  const n=3+Math.floor(Math.random()*4);
+  app.innerHTML=`<h2>Test audio</h2><p style="color:#b00">${msg}</p><p>Activez le son de votre appareil, puis écoutez la série de bips.</p><p><button id="p">▶ Écouter</button></p><p>Combien de bips avez-vous entendus ? <input id="n" type="number" min="0" max="20" style="width:4rem"> <button id="ok">Valider</button></p>`;
+  $('#p').onclick=()=>beep(n);
+  $('#ok').onclick=()=>{if(+$('#n').value===n){audioOk=true;comp();}else audio("Réponse incorrecte. Vérifiez votre son et réessayez.");};
+}
+function comp(msg=''){
+  app.innerHTML=`<h2>Vérification des consignes</h2><p style="color:#b00">${msg}</p><details ${msg?'open':''}><summary>Rappel des consignes</summary><div style="white-space:pre-wrap">${esc(E.instructions)}</div></details>`+
+  E.comprehension.map((c,i)=>`<div class="q"><b>${esc(c.q)}</b>${c.options.map((o,j)=>`<div><label><input type="radio" name="c${i}" value="${j}"> ${esc(o)}</label></div>`).join('')}</div>`).join('')+'<button id="b">Valider</button>';
+  $('#b').onclick=async()=>{
+    const a=E.comprehension.map((_,i)=>{const r=document.querySelector(`input[name=c${i}]:checked`);return r?+r.value:-1;});
+    const r=await api('/api/start',{experiment_id:E.id,audio_ok:audioOk,attempts,comp:a});
+    if(!r.ok){attempts++;return comp('Au moins une réponse est incorrecte. Relisez les consignes et réessayez.');}
+    S=r;ix=0;loadYT().then(show);
+  };
+}
+function loadYT(){return new Promise(r=>{if(window.YT&&YT.Player)return r();window.onYouTubeIframeAPIReady=r;const s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';document.head.appendChild(s);});}
+const qh=q=>`<div class="q"><b>${esc(q.text)}</b>`+(q.kind==='likert'?`<div class="lk">${Array.from({length:q.scale},(_,i)=>`<label><input type="radio" name="q${q.id}" value="${i+1}"><br>${i+1}</label>`).join('')}</div>`:`<input type="range" min="0" max="100" value="50" name="q${q.id}" data-s="0" oninput="this.dataset.s=1">`)+`<div class="ends"><span>${esc(q.left_label)}</span><span>${esc(q.right_label)}</span></div></div>`;
+async function show(){
+  try{player&&player.destroy();}catch(e){}
+  if(ix>=S.videos.length){await api('/api/finish',{session:S.session});return app.innerHTML='<h2>Merci pour votre participation !</h2>';}
+  const v=S.videos[ix];ended=false;
+  app.innerHTML=`<progress value="${ix}" max="${S.videos.length}"></progress><h2>Vidéo ${ix+1} / ${S.videos.length}</h2><div id="yt"></div>`+(v.instruction?`<p><b>${esc(v.instruction)}</b></p>`:'')+`<p id="w"><i>Regardez la vidéo en entier pour accéder aux questions.</i></p><div id="qs" class="hide">${S.questions.map(qh).join('')}<button id="nx">Suivant</button></div>`;
+  player=new YT.Player('yt',{videoId:v.yt,playerVars:{rel:0,playsinline:1},events:{onStateChange:e=>{if(e.data===0){ended=true;$('#qs').classList.remove('hide');$('#w').remove();}}}});
+  $('#nx').onclick=async()=>{
+    const a={};
+    for(const q of S.questions){
+      const el=q.kind==='likert'?document.querySelector(`input[name=q${q.id}]:checked`):document.querySelector(`input[name=q${q.id}]`);
+      if(!el||(q.kind==='slider'&&el.dataset.s!=='1'))return alert('Merci de répondre à toutes les questions (déplacez les curseurs).');
+      a[q.id]=+el.value;
+    }
+    await api('/api/answer',{session:S.session,video_id:v.id,answers:a,ended});ix++;show();
+  };
+}
+init();
+</script></html>
