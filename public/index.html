@@ -1,4 +1,4 @@
-<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Étude</title>
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Study</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
 <style>
@@ -60,44 +60,45 @@ a.btn{display:inline-block;font-weight:700;border-radius:12px;padding:.7rem 1.4r
 <div class="wrap"><header><h1 id="title"></h1><div id="pb" class="hide"><progress id="gp" value="0" max="1"></progress><small id="gl"></small></div></header>
 <div id="app" class="sheet"></div></div>
 <script>
-const $=s=>document.querySelector(s),app=$('#app'),qp=new URLSearchParams(location.search),eid=qp.get('e'),PL={pid:qp.get('PROLIFIC_PID')||'',study:qp.get('STUDY_ID')||'',session:qp.get('SESSION_ID')||''};
+const $=s=>document.querySelector(s),app=$('#app'),qp=new URLSearchParams(location.search),eid=qp.get('e')||decodeURIComponent(location.pathname.replace(/^\/+|\/+$/g,'').replace(/^index\.html$/,'')),PL={pid:qp.get('PROLIFIC_PID')||'',study:qp.get('STUDY_ID')||'',session:qp.get('SESSION_ID')||''};
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const api=(u,b)=>fetch(u,b?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}:{}).then(r=>r.json());
 let E,S,ix=0,attempts=1,audioOk=false,ended=false,player,consented=false,mx=0,seeks=0,timer;
 async function init(){
-  if(!eid){const l=await api('/api/public');return app.innerHTML=l.length?l.map(x=>`<p><a href="?e=${x.id}">${esc(x.name)}</a></p>`).join(''):'Aucune expérience active.';}
-  E=await api('/api/public/'+eid);if(!E.id)return app.textContent='Expérience introuvable.';
+  let key=eid;
+  if(!key){const l=await api('/api/public');if(l.length!==1)return app.innerHTML=l.length?l.map(x=>`<p><a href="/${x.slug||x.id}${location.search}">${esc(x.name)}</a></p>`).join(''):'No study is currently open.';key=l[0].id;}
+  E=await api('/api/public/'+encodeURIComponent(key));if(!E.id)return app.textContent='Study not found.';if(E.full)return app.innerHTML='<h2>This study is full</h2><p>All the places have been filled. Thank you for your interest.</p>';
   $('#title').textContent=E.name;E.consent?consent():intro();
 }
-function prog(k){const c=E.consent?1:0,d=E.has_demo?1:0,V=S?S.videos.length:E.n_videos+E.n_attention,tot=c+3+d+V;$('#pb').classList.remove('hide');$('#gp').max=tot;$('#gp').value=Math.min(k,tot);$('#gl').textContent=k>=tot?'Terminé':`Étape ${k+1} / ${tot}`;}
+function prog(k){const c=E.consent?1:0,d=E.has_demo?1:0,V=S?S.videos.length:E.n_videos+E.n_attention,tot=c+3+d+V;$('#pb').classList.remove('hide');$('#gp').max=tot;$('#gp').value=Math.min(k,tot);$('#gl').textContent=k>=tot?'Done':`Step ${k+1} / ${tot}`;}
 function consent(){prog(0);
-  app.innerHTML=`<h2>Consentement</h2><div style="white-space:pre-wrap">${esc(E.consent)}</div><label class="opt"><input type="checkbox" id="c"> J'ai lu ces informations et j'accepte de participer.</label><p><button id="b" disabled>Continuer</button> <button id="r">Je refuse</button></p>`;
+  app.innerHTML=`<h2>Consent</h2><div style="white-space:pre-wrap">${esc(E.consent)}</div><label class="opt"><input type="checkbox" id="c"> I have read this information and agree to take part.</label><p><button id="b" disabled>Continue</button> <button id="r">I do not agree</button></p>`;
   $('#c').onchange=()=>$('#b').disabled=!$('#c').checked;
   $('#b').onclick=()=>{consented=true;intro();};
-  $('#r').onclick=()=>app.innerHTML='<p>Merci. Vous avez choisi de ne pas participer.</p>';
+  $('#r').onclick=()=>app.innerHTML='<p>Thank you. You have chosen not to take part.</p>';
 }
-function intro(){prog(E.consent?1:0);app.innerHTML=`<div style="white-space:pre-wrap">${esc(E.instructions)}</div><p><button id="b">Continuer</button></p>`;$('#b').onclick=()=>audio();}
+function intro(){prog(E.consent?1:0);app.innerHTML=`<div style="white-space:pre-wrap">${esc(E.instructions)}</div><p><button id="b">Continue</button></p>`;$('#b').onclick=()=>audio();}
 function beep(n){const c=new(window.AudioContext||window.webkitAudioContext)();for(let i=0;i<n;i++){const o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=660;g.gain.value=.3;o.start(c.currentTime+i*.6);o.stop(c.currentTime+i*.6+.3);}}
 function audio(msg=''){prog((E.consent?1:0)+1);
   const n=3+Math.floor(Math.random()*4);
-  app.innerHTML=`<h2>Test audio</h2><p style="color:#b00">${msg}</p><p>Activez le son de votre appareil, puis écoutez la série de bips.</p><p><button id="p">▶ Écouter</button></p><p>Combien de bips avez-vous entendus ? <input id="n" type="number" min="0" max="20" style="width:4rem"> <button id="ok">Valider</button></p>`;
+  app.innerHTML=`<h2>Audio check</h2><p style="color:#b00">${msg}</p><p>Turn on your device's sound, then listen to the series of beeps.</p><p><button id="p">▶ Listen</button></p><p>How many beeps did you hear? <input id="n" type="number" min="0" max="20" style="width:4rem"> <button id="ok">Submit</button></p>`;
   $('#p').onclick=()=>beep(n);
-  $('#ok').onclick=()=>{if(+$('#n').value===n){audioOk=true;comp();}else audio("Réponse incorrecte. Vérifiez votre son et réessayez.");};
+  $('#ok').onclick=()=>{if(+$('#n').value===n){audioOk=true;comp();}else audio("Incorrect answer. Please check your sound and try again.");};
 }
 function comp(msg=''){prog((E.consent?1:0)+2);
-  app.innerHTML=`<h2>Vérification des consignes</h2><p style="color:#b00">${msg}</p><details ${msg?'open':''}><summary>Rappel des consignes</summary><div style="white-space:pre-wrap">${esc(E.instructions)}</div></details>`+
-  E.comprehension.map((c,i)=>`<div class="q"><b>${esc(c.q)}</b>${c.options.map((o,j)=>`<label class="opt"><input type="radio" name="c${i}" value="${j}"> ${esc(o)}</label>`).join('')}</div>`).join('')+'<button id="b">Valider</button>';
+  app.innerHTML=`<h2>Instructions check</h2><p style="color:#b00">${msg}</p><details ${msg?'open':''}><summary>Reminder of the instructions</summary><div style="white-space:pre-wrap">${esc(E.instructions)}</div></details>`+
+  E.comprehension.map((c,i)=>`<div class="q"><b>${esc(c.q)}</b>${c.options.map((o,j)=>`<label class="opt"><input type="radio" name="c${i}" value="${j}"> ${esc(o)}</label>`).join('')}</div>`).join('')+'<button id="b">Submit</button>';
   $('#b').onclick=async()=>{
     const a=E.comprehension.map((_,i)=>{const r=document.querySelector(`input[name=c${i}]:checked`);return r?+r.value:-1;});
     const r=await api('/api/start',{experiment_id:E.id,audio_ok:audioOk,attempts,comp:a,consent:consented,prolific:PL});
-    if(!r.ok){attempts++;return comp('Au moins une réponse est incorrecte. Relisez les consignes et réessayez.');}
+    if(r.full)return app.innerHTML='<h2>This study is full</h2><p>All the places have been filled. Thank you for your interest.</p>';if(!r.ok){attempts++;return comp('At least one answer is incorrect. Please re-read the instructions and try again.');}
     S=r;ix=0;loadYT().then(demo);
   };
 }
 function demo(){
   if(!S.demo.length)return show();prog((E.consent?1:0)+3);
-  app.innerHTML='<h2>Quelques informations vous concernant</h2>'+S.demo.map(q=>`<div class="q"><b>${esc(q.text)}</b><br>`+(q.kind==='demo_choice'?`<select name="q${q.id}"><option value="">—</option>${(q.options||'').split(';').map(o=>`<option>${esc(o.trim())}</option>`).join('')}</select>`:`<input name="q${q.id}" style="width:100%">`)+'</div>').join('')+'<button id="b">Continuer</button>';
-  $('#b').onclick=async()=>{const a={};for(const q of S.demo){const v=document.querySelector(`[name=q${q.id}]`).value.trim();if(!v)return alert('Merci de répondre à toutes les questions.');a[q.id]=v;}await api('/api/demo',{session:S.session,answers:a});show();};
+  app.innerHTML='<h2>A few questions about you</h2>'+S.demo.map(q=>`<div class="q"><b>${esc(q.text)}</b><br>`+(q.kind==='demo_choice'?`<select name="q${q.id}"><option value="">—</option>${(q.options||'').split(';').map(o=>`<option>${esc(o.trim())}</option>`).join('')}</select>`:`<input name="q${q.id}" style="width:100%">`)+'</div>').join('')+'<button id="b">Continue</button>';
+  $('#b').onclick=async()=>{const a={};for(const q of S.demo){const v=document.querySelector(`[name=q${q.id}]`).value.trim();if(!v)return alert('Please answer all the questions.');a[q.id]=v;}await api('/api/demo',{session:S.session,answers:a});show();};
 }
 // Anti-avance rapide : contrôles masqués, clavier désactivé, retour forcé si saut en avant
 function guard(){clearInterval(timer);mx=0;seeks=0;timer=setInterval(()=>{try{const s=player.getPlayerState();if(s!==1&&s!==2&&s!==3)return;const t=player.getCurrentTime();if(t>mx+1.5){seeks++;player.seekTo(mx,true);}else if(t>mx)mx=t;if(player.getPlaybackRate()!==1)player.setPlaybackRate(1);}catch(e){}},500);}
@@ -109,7 +110,7 @@ function native(v){
   el.ontimeupdate=el.onseeking=()=>{if(el.currentTime>mx+1.5){seeks++;el.currentTime=mx;}else if(el.currentTime>mx)mx=el.currentTime;};
   el.onratechange=()=>{el.playbackRate=1;};
   el.onended=()=>{ended=true;$('#qs').classList.remove('hide');$('#w')&&$('#w').remove();};
-  el.onerror=()=>{$('#w').textContent='Erreur de chargement de la vidéo. Rechargez la page.';};
+  el.onerror=()=>{$('#w').textContent='The video failed to load. Please reload the page.';};
   $('#pp').onclick=()=>el.paused?el.play():el.pause();
 }
 function loadYT(){return new Promise(r=>{if(window.YT&&YT.Player)return r();window.onYouTubeIframeAPIReady=r;const s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';document.head.appendChild(s);});}
@@ -117,19 +118,19 @@ const qh=q=>`<div class="q"><b>${esc(q.text)}</b>`+(q.kind==='likert'?`<div clas
 async function show(){
   clearInterval(timer);try{player&&player.destroy();}catch(e){}
   if(ix>=S.videos.length){const f=await api('/api/finish',{session:S.session});
-    if(!f.ok)return app.innerHTML='<h2>Un problème est survenu</h2><p>Vos réponses n\'ont pas pu être validées. Rechargez la page, ou contactez l\'équipe de recherche.</p>';
+    if(!f.ok)return app.innerHTML='<h2>Something went wrong</h2><p>Your answers could not be validated. Please reload the page or contact the research team.</p>';
     prog(1e3);
-    const done=f.code?`<p>Pour valider votre participation sur Prolific, cliquez sur le bouton ci-dessous ou saisissez ce code de confirmation :</p><p><b class="code">${esc(f.code)}</b></p><p><a class="btn" href="https://app.prolific.com/submissions/complete?cc=${encodeURIComponent(f.code)}">Retourner sur Prolific</a></p>`:'<p>Vous pouvez fermer cette page.</p>';
-    return app.innerHTML='<h2>Merci pour votre participation !</h2><p>Vos réponses ont bien été enregistrées.</p>'+done;}
+    const done=f.code?`<p>To confirm your participation on Prolific, click the button below or enter this completion code:</p><p><b class="code">${esc(f.code)}</b></p><p><a class="btn" href="https://app.prolific.com/submissions/complete?cc=${encodeURIComponent(f.code)}">Return to Prolific</a></p>`:'<p>You may now close this page.</p>';
+    return app.innerHTML='<h2>Thank you for taking part!</h2><p>Your answers have been recorded.</p>'+done;}
   const v=S.videos[ix];ended=false;prog((E.consent?1:0)+3+(E.has_demo?1:0)+ix);
-  app.innerHTML=`<h2>Vidéo ${ix+1} / ${S.videos.length}</h2><div id="yt"></div><p><button id="pp">⏯ Lecture / Pause</button></p>`+(v.instruction?`<p class="note">${esc(v.instruction)}</p>`:'')+`<p id="w"><i>Regardez la vidéo en entier pour accéder aux questions.</i></p><div id="qs" class="hide">${S.questions.map(qh).join('')}<button id="nx">Suivant</button></div>`;
-  if(!isYT(v.yt))native(v);else player=new YT.Player('yt',{videoId:v.yt,playerVars:{rel:0,playsinline:1,controls:0,disablekb:1},events:{onError:()=>{const w=$('#w');if(w)w.textContent='Cette vidéo ne peut pas être lue. Rechargez la page ou contactez l\'équipe de recherche.';},onStateChange:e=>{if(e.data===0){ended=true;$('#qs').classList.remove('hide');$('#w').remove();}}}});
+  app.innerHTML=`<h2>Video ${ix+1} / ${S.videos.length}</h2><div id="yt"></div><p><button id="pp">⏯ Play / Pause</button></p>`+(v.instruction?`<p class="note">${esc(v.instruction)}</p>`:'')+`<p id="w"><i>Please watch the whole video to unlock the questions.</i></p><div id="qs" class="hide">${S.questions.map(qh).join('')}<button id="nx">Next</button></div>`;
+  if(!isYT(v.yt))native(v);else player=new YT.Player('yt',{videoId:v.yt,playerVars:{rel:0,playsinline:1,controls:0,disablekb:1},events:{onError:()=>{const w=$('#w');if(w)w.textContent='This video cannot be played. Please reload the page or contact the research team.';},onStateChange:e=>{if(e.data===0){ended=true;$('#qs').classList.remove('hide');$('#w').remove();}}}});
   if(isYT(v.yt)){guard();$('#pp').onclick=()=>{try{player.getPlayerState()===1?player.pauseVideo():player.playVideo();}catch(e){}};}
   $('#nx').onclick=async()=>{
     const a={};
     for(const q of S.questions){
       const el=q.kind==='likert'?document.querySelector(`input[name=q${q.id}]:checked`):document.querySelector(`input[name=q${q.id}]`);
-      if(!el||(q.kind==='slider'&&el.dataset.s!=='1'))return alert('Merci de répondre à toutes les questions (déplacez les curseurs).');
+      if(!el||(q.kind==='slider'&&el.dataset.s!=='1'))return alert('Please answer all the questions (move every slider).');
       a[q.id]=+el.value;
     }
     a._seeks=seeks;await api('/api/answer',{session:S.session,video_id:v.id,answers:a,ended});ix++;show();
