@@ -52,6 +52,8 @@ input[type=range][data-s="0"]::-moz-range-thumb{background:var(--sheet);box-shad
 #pp{margin-top:.9rem}
 #w{color:var(--mute);font-size:.95rem}
 .note{background:var(--soft);border-left:4px solid var(--acc);padding:.7rem 1rem;border-radius:0 10px 10px 0;margin:1rem 0}
+.sec+.sec{border-top:2px solid var(--acc);margin-top:1.2rem;padding-top:.6rem}
+.sec h3{margin:.8rem 0 0;font-size:1rem;color:var(--mute)}
 #qs{margin-top:.8rem}#nx{margin-top:.6rem}
 a.btn{display:inline-block;font-weight:700;border-radius:12px;padding:.7rem 1.4rem;background:var(--acc);color:var(--acc-ink);text-decoration:none}
 .code{font-size:1.6rem;letter-spacing:.08em;background:var(--soft);padding:.4rem 1rem;border-radius:10px;display:inline-block;user-select:all}
@@ -116,6 +118,12 @@ function native(v){
 }
 function loadYT(){return new Promise(r=>{if(window.YT&&YT.Player)return r();window.onYouTubeIframeAPIReady=r;const s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';document.head.appendChild(s);});}
 const qh=q=>`<div class="q"><b>${esc(q.text)}</b>`+(q.kind==='likert'?`<div class="lk${(q.options||'').includes(';')?' txt':''}">${Array.from({length:q.scale},(_,i)=>`<label><input type="radio" name="q${q.id}" value="${i+1}"><span>${(q.options||'').split(';')[i]?.trim()||i+1}</span></label>`).join('')}</div>`:`<input type="range" min="0" max="100" value="50" name="q${q.id}" data-s="0" oninput="this.dataset.s=1">`)+`<div class="ends"><span>${esc(q.left_label)}</span><span>${esc(q.right_label)}</span></div></div>`;
+// Sections séparées par une ligne ; les questions cochées « aléatoire » sont mélangées entre elles à l'intérieur de leur section, à chaque vidéo
+function arrange(){
+  const g=[];S.questions.forEach(q=>{const n=q.section||'';let x=g.find(y=>y.n===n);if(!x)g.push(x={n,l:[]});x.l.push(q);});
+  g.forEach(x=>{const idx=x.l.map((q,i)=>q.shuffle?i:-1).filter(i=>i>=0),f=idx.map(i=>x.l[i]);for(let i=f.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[f[i],f[j]]=[f[j],f[i]];}idx.forEach((p,k)=>x.l[p]=f[k]);});
+  return{order:g.flatMap(x=>x.l.map(q=>q.id)),html:g.map(x=>`<div class="sec">${x.n?`<h3>${esc(x.n)}</h3>`:''}${x.l.map(qh).join('')}</div>`).join('')};
+}
 async function show(){
   clearInterval(timer);try{player&&player.destroy();}catch(e){}
   if(ix>=S.videos.length){const f=await api('/api/finish',{session:S.session});
@@ -123,8 +131,8 @@ async function show(){
     prog(1e3);
     const done=f.code?`<p>To confirm your participation on Prolific, click the button below or enter this completion code:</p><p><b class="code">${esc(f.code)}</b></p><p><a class="btn" href="https://app.prolific.com/submissions/complete?cc=${encodeURIComponent(f.code)}">Return to Prolific</a></p>`:'<p>You may now close this page.</p>';
     return app.innerHTML='<h2>Thank you for taking part!</h2><p>Your answers have been recorded.</p>'+done;}
-  const v=S.videos[ix];ended=false;prog((E.consent?1:0)+3+(E.has_demo?1:0)+ix);
-  app.innerHTML=`<h2>Video ${ix+1} / ${S.videos.length}</h2><div id="yt"></div><p><button id="pp">⏯ Play / Pause</button></p>`+(v.instruction?`<p class="note">${esc(v.instruction)}</p>`:'')+`<p id="w"><i>Please watch the whole video to unlock the questions.</i></p><div id="qs" class="hide">${S.questions.map(qh).join('')}<button id="nx">Next</button></div>`;
+  const v=S.videos[ix],blk=arrange();ended=false;prog((E.consent?1:0)+3+(E.has_demo?1:0)+ix);
+  app.innerHTML=`<h2>Video ${ix+1} / ${S.videos.length}</h2><div id="yt"></div><p><button id="pp">⏯ Play / Pause</button></p>`+(v.instruction?`<p class="note">${esc(v.instruction)}</p>`:'')+`<p id="w"><i>Please watch the whole video to unlock the questions.</i></p><div id="qs" class="hide">${blk.html}<button id="nx">Next</button></div>`;
   if(!isYT(v.yt))native(v);else player=new YT.Player('yt',{videoId:v.yt,playerVars:{rel:0,playsinline:1,controls:0,disablekb:1},events:{onError:()=>{const w=$('#w');if(w)w.textContent='This video cannot be played. Please reload the page or contact the research team.';},onStateChange:e=>{if(e.data===0){ended=true;$('#qs').classList.remove('hide');$('#w').remove();}}}});
   if(isYT(v.yt)){guard();$('#pp').onclick=()=>{try{player.getPlayerState()===1?player.pauseVideo():player.playVideo();}catch(e){}};}
   $('#nx').onclick=async()=>{
@@ -134,7 +142,7 @@ async function show(){
       if(!el||(q.kind==='slider'&&el.dataset.s!=='1'))return alert('Please answer all the questions (move every slider).');
       a[q.id]=+el.value;
     }
-    a._seeks=seeks;await api('/api/answer',{session:S.session,video_id:v.id,answers:a,ended});ix++;show();
+    a._seeks=seeks;a._order=blk.order;await api('/api/answer',{session:S.session,video_id:v.id,answers:a,ended});ix++;show();
   };
 }
 init();
