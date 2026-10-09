@@ -1,42 +1,130 @@
 <!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Étude</title>
-<style>body{font:16px/1.5 system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;color:#222}button{padding:.6rem 1.2rem;font-size:1rem;cursor:pointer}.q{margin:1.4rem 0}.lk{display:flex;gap:4px}.lk label{text-align:center;flex:1}.ends{display:flex;justify-content:space-between;font-size:.85rem;color:#666}input[type=range]{width:100%}#yt{width:100%;aspect-ratio:16/9}.hide{display:none}progress{width:100%}</style>
-<h1 id="title"></h1><div id="app"></div>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+:root{--bg:#EEF2F6;--sheet:#fff;--ink:#17222E;--mute:#58697A;--line:#D6DFE8;--acc:#2D4F9E;--acc-ink:#fff;--soft:#E6ECF8;--stage:#0F1722}
+@media (prefers-color-scheme:dark){:root{--bg:#0E141B;--sheet:#17202A;--ink:#E8EEF4;--mute:#9DAEBE;--line:#2A3743;--acc:#8FB0FF;--acc-ink:#0E141B;--soft:#1F2D45;--stage:#05080C}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.6 "Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+.hide{display:none!important}
+.wrap{max-width:760px;margin:0 auto;padding:0 1rem 3rem}
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:.9rem 0 .7rem;margin-bottom:1rem;border-bottom:1px solid var(--line)}
+h1{font-size:1rem;margin:0 0 .5rem;font-weight:700;color:var(--mute)}
+#pb{display:flex;align-items:center;gap:.8rem}
+#gl{white-space:nowrap;color:var(--mute);font-size:.9rem;min-width:7.5rem;text-align:right}
+progress{flex:1;height:8px;appearance:none;-webkit-appearance:none;border:0;border-radius:99px;background:var(--line);overflow:hidden}
+progress::-webkit-progress-bar{background:var(--line)}
+progress::-webkit-progress-value{background:var(--acc);border-radius:99px;transition:width .5s}
+progress::-moz-progress-bar{background:var(--acc);border-radius:99px}
+.sheet{background:var(--sheet);border:1px solid var(--line);border-radius:18px;padding:1.6rem clamp(1rem,4vw,2.2rem);box-shadow:0 1px 2px rgba(20,30,45,.05),0 14px 34px -20px rgba(20,30,45,.3)}
+#app:empty{display:none}
+h2{font-size:1.5rem;line-height:1.25;margin:.1rem 0 1rem}
+p{margin:.8rem 0}a{color:var(--acc)}
+details{margin:.8rem 0;color:var(--mute)}summary{cursor:pointer}
+button{font:inherit;font-weight:700;border:0;border-radius:12px;padding:.7rem 1.4rem;background:var(--acc);color:var(--acc-ink);cursor:pointer;transition:transform .08s,opacity .2s}
+button:hover{opacity:.9}button:active{transform:translateY(1px)}
+button:disabled{background:var(--line);color:var(--mute);cursor:not-allowed}
+button#r,button#pp{background:transparent;color:var(--acc);box-shadow:inset 0 0 0 1.5px var(--acc)}
+:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+input:not([type=radio]):not([type=checkbox]):not([type=range]),select{font:inherit;padding:.55rem .75rem;border:1.5px solid var(--line);border-radius:10px;background:var(--sheet);color:var(--ink);max-width:100%}
+input[type=radio],input[type=checkbox]{accent-color:var(--acc);width:1.1rem;height:1.1rem}
+.opt{display:flex;gap:.7rem;align-items:center;padding:.7rem .9rem;border:1.5px solid var(--line);border-radius:12px;margin:.45rem 0;cursor:pointer}
+.opt:has(input:checked){border-color:var(--acc);background:var(--soft)}
+.q{padding:1.1rem 0}.q+.q{border-top:1px solid var(--line)}
+.q>b{display:block;margin-bottom:.8rem;font-size:1.05rem}
+.lk{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:6px}
+.lk label{display:block;position:relative}
+.lk input{position:absolute;opacity:0;inset:0;width:100%;height:100%;margin:0;cursor:pointer}
+.lk span{display:block;text-align:center;padding:.7rem 0;border:1.5px solid var(--line);border-radius:10px;font-weight:700;color:var(--mute);transition:background .15s,color .15s,border-color .15s}
+.lk label:hover span{border-color:var(--acc)}
+.lk input:checked+span{background:var(--acc);border-color:var(--acc);color:var(--acc-ink)}
+.lk input:focus-visible+span{outline:3px solid var(--acc);outline-offset:2px}
+.ends{display:flex;justify-content:space-between;gap:1rem;font-size:.88rem;color:var(--mute);margin-top:.45rem}
+input[type=range]{width:100%;height:28px;appearance:none;-webkit-appearance:none;background:transparent;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:8px;border-radius:99px;background:var(--line)}
+input[type=range]::-moz-range-track{height:8px;border-radius:99px;background:var(--line)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;margin-top:-9px;border-radius:50%;background:var(--acc);border:3px solid var(--sheet);box-shadow:0 0 0 1.5px var(--acc)}
+input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:var(--acc);border:3px solid var(--sheet);box-shadow:0 0 0 1.5px var(--acc)}
+input[type=range][data-s="0"]::-webkit-slider-thumb{background:var(--sheet);box-shadow:0 0 0 1.5px var(--mute)}
+input[type=range][data-s="0"]::-moz-range-thumb{background:var(--sheet);box-shadow:0 0 0 1.5px var(--mute)}
+#yt{width:100%;aspect-ratio:16/9;background:var(--stage);border-radius:14px;overflow:hidden;box-shadow:0 20px 44px -22px rgba(0,0,0,.65)}
+#yt iframe,#yt video{width:100%;height:100%;display:block}
+#pp{margin-top:.9rem}
+#w{color:var(--mute);font-size:.95rem}
+.note{background:var(--soft);border-left:4px solid var(--acc);padding:.7rem 1rem;border-radius:0 10px 10px 0;margin:1rem 0}
+#qs{margin-top:.8rem}#nx{margin-top:.6rem}
+a.btn{display:inline-block;font-weight:700;border-radius:12px;padding:.7rem 1.4rem;background:var(--acc);color:var(--acc-ink);text-decoration:none}
+.code{font-size:1.6rem;letter-spacing:.08em;background:var(--soft);padding:.4rem 1rem;border-radius:10px;display:inline-block;user-select:all}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+<div class="wrap"><header><h1 id="title"></h1><div id="pb" class="hide"><progress id="gp" value="0" max="1"></progress><small id="gl"></small></div></header>
+<div id="app" class="sheet"></div></div>
 <script>
-const $=s=>document.querySelector(s),app=$('#app'),eid=new URLSearchParams(location.search).get('e');
+const $=s=>document.querySelector(s),app=$('#app'),qp=new URLSearchParams(location.search),eid=qp.get('e'),PL={pid:qp.get('PROLIFIC_PID')||'',study:qp.get('STUDY_ID')||'',session:qp.get('SESSION_ID')||''};
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const api=(u,b)=>fetch(u,b?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}:{}).then(r=>r.json());
-let E,S,ix=0,attempts=1,audioOk=false,ended=false,player;
+let E,S,ix=0,attempts=1,audioOk=false,ended=false,player,consented=false,mx=0,seeks=0,timer;
 async function init(){
   if(!eid){const l=await api('/api/public');return app.innerHTML=l.length?l.map(x=>`<p><a href="?e=${x.id}">${esc(x.name)}</a></p>`).join(''):'Aucune expérience active.';}
   E=await api('/api/public/'+eid);if(!E.id)return app.textContent='Expérience introuvable.';
-  $('#title').textContent=E.name;intro();
+  $('#title').textContent=E.name;E.consent?consent():intro();
 }
-function intro(){app.innerHTML=`<div style="white-space:pre-wrap">${esc(E.instructions)}</div><p><button id="b">Continuer</button></p>`;$('#b').onclick=()=>audio();}
+function prog(k){const c=E.consent?1:0,d=E.has_demo?1:0,V=S?S.videos.length:E.n_videos+E.n_attention,tot=c+3+d+V;$('#pb').classList.remove('hide');$('#gp').max=tot;$('#gp').value=Math.min(k,tot);$('#gl').textContent=k>=tot?'Terminé':`Étape ${k+1} / ${tot}`;}
+function consent(){prog(0);
+  app.innerHTML=`<h2>Consentement</h2><div style="white-space:pre-wrap">${esc(E.consent)}</div><label class="opt"><input type="checkbox" id="c"> J'ai lu ces informations et j'accepte de participer.</label><p><button id="b" disabled>Continuer</button> <button id="r">Je refuse</button></p>`;
+  $('#c').onchange=()=>$('#b').disabled=!$('#c').checked;
+  $('#b').onclick=()=>{consented=true;intro();};
+  $('#r').onclick=()=>app.innerHTML='<p>Merci. Vous avez choisi de ne pas participer.</p>';
+}
+function intro(){prog(E.consent?1:0);app.innerHTML=`<div style="white-space:pre-wrap">${esc(E.instructions)}</div><p><button id="b">Continuer</button></p>`;$('#b').onclick=()=>audio();}
 function beep(n){const c=new(window.AudioContext||window.webkitAudioContext)();for(let i=0;i<n;i++){const o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=660;g.gain.value=.3;o.start(c.currentTime+i*.6);o.stop(c.currentTime+i*.6+.3);}}
-function audio(msg=''){
+function audio(msg=''){prog((E.consent?1:0)+1);
   const n=3+Math.floor(Math.random()*4);
   app.innerHTML=`<h2>Test audio</h2><p style="color:#b00">${msg}</p><p>Activez le son de votre appareil, puis écoutez la série de bips.</p><p><button id="p">▶ Écouter</button></p><p>Combien de bips avez-vous entendus ? <input id="n" type="number" min="0" max="20" style="width:4rem"> <button id="ok">Valider</button></p>`;
   $('#p').onclick=()=>beep(n);
   $('#ok').onclick=()=>{if(+$('#n').value===n){audioOk=true;comp();}else audio("Réponse incorrecte. Vérifiez votre son et réessayez.");};
 }
-function comp(msg=''){
+function comp(msg=''){prog((E.consent?1:0)+2);
   app.innerHTML=`<h2>Vérification des consignes</h2><p style="color:#b00">${msg}</p><details ${msg?'open':''}><summary>Rappel des consignes</summary><div style="white-space:pre-wrap">${esc(E.instructions)}</div></details>`+
-  E.comprehension.map((c,i)=>`<div class="q"><b>${esc(c.q)}</b>${c.options.map((o,j)=>`<div><label><input type="radio" name="c${i}" value="${j}"> ${esc(o)}</label></div>`).join('')}</div>`).join('')+'<button id="b">Valider</button>';
+  E.comprehension.map((c,i)=>`<div class="q"><b>${esc(c.q)}</b>${c.options.map((o,j)=>`<label class="opt"><input type="radio" name="c${i}" value="${j}"> ${esc(o)}</label>`).join('')}</div>`).join('')+'<button id="b">Valider</button>';
   $('#b').onclick=async()=>{
     const a=E.comprehension.map((_,i)=>{const r=document.querySelector(`input[name=c${i}]:checked`);return r?+r.value:-1;});
-    const r=await api('/api/start',{experiment_id:E.id,audio_ok:audioOk,attempts,comp:a});
+    const r=await api('/api/start',{experiment_id:E.id,audio_ok:audioOk,attempts,comp:a,consent:consented,prolific:PL});
     if(!r.ok){attempts++;return comp('Au moins une réponse est incorrecte. Relisez les consignes et réessayez.');}
-    S=r;ix=0;loadYT().then(show);
+    S=r;ix=0;loadYT().then(demo);
   };
 }
+function demo(){
+  if(!S.demo.length)return show();prog((E.consent?1:0)+3);
+  app.innerHTML='<h2>Quelques informations vous concernant</h2>'+S.demo.map(q=>`<div class="q"><b>${esc(q.text)}</b><br>`+(q.kind==='demo_choice'?`<select name="q${q.id}"><option value="">—</option>${(q.options||'').split(';').map(o=>`<option>${esc(o.trim())}</option>`).join('')}</select>`:`<input name="q${q.id}" style="width:100%">`)+'</div>').join('')+'<button id="b">Continuer</button>';
+  $('#b').onclick=async()=>{const a={};for(const q of S.demo){const v=document.querySelector(`[name=q${q.id}]`).value.trim();if(!v)return alert('Merci de répondre à toutes les questions.');a[q.id]=v;}await api('/api/demo',{session:S.session,answers:a});show();};
+}
+// Anti-avance rapide : contrôles masqués, clavier désactivé, retour forcé si saut en avant
+function guard(){clearInterval(timer);mx=0;seeks=0;timer=setInterval(()=>{try{const s=player.getPlayerState();if(s!==1&&s!==2&&s!==3)return;const t=player.getCurrentTime();if(t>mx+1.5){seeks++;player.seekTo(mx,true);}else if(t>mx)mx=t;if(player.getPlaybackRate()!==1)player.setPlaybackRate(1);}catch(e){}},500);}
+const isYT=s=>s.length===11&&!/[\/:]/.test(s);
+// Lecteur HTML5 (Nextcloud / lien direct) avec le même blocage de l'avance rapide
+function native(v){
+  const el=document.createElement('video');el.src=v.yt;el.playsInline=true;el.preload='auto';el.style.cssText='width:100%;height:100%;background:#000';$('#yt').appendChild(el);
+  mx=0;seeks=0;
+  el.ontimeupdate=el.onseeking=()=>{if(el.currentTime>mx+1.5){seeks++;el.currentTime=mx;}else if(el.currentTime>mx)mx=el.currentTime;};
+  el.onratechange=()=>{el.playbackRate=1;};
+  el.onended=()=>{ended=true;$('#qs').classList.remove('hide');$('#w')&&$('#w').remove();};
+  el.onerror=()=>{$('#w').textContent='Erreur de chargement de la vidéo. Rechargez la page.';};
+  $('#pp').onclick=()=>el.paused?el.play():el.pause();
+}
 function loadYT(){return new Promise(r=>{if(window.YT&&YT.Player)return r();window.onYouTubeIframeAPIReady=r;const s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';document.head.appendChild(s);});}
-const qh=q=>`<div class="q"><b>${esc(q.text)}</b>`+(q.kind==='likert'?`<div class="lk">${Array.from({length:q.scale},(_,i)=>`<label><input type="radio" name="q${q.id}" value="${i+1}"><br>${i+1}</label>`).join('')}</div>`:`<input type="range" min="0" max="100" value="50" name="q${q.id}" data-s="0" oninput="this.dataset.s=1">`)+`<div class="ends"><span>${esc(q.left_label)}</span><span>${esc(q.right_label)}</span></div></div>`;
+const qh=q=>`<div class="q"><b>${esc(q.text)}</b>`+(q.kind==='likert'?`<div class="lk">${Array.from({length:q.scale},(_,i)=>`<label><input type="radio" name="q${q.id}" value="${i+1}"><span>${i+1}</span></label>`).join('')}</div>`:`<input type="range" min="0" max="100" value="50" name="q${q.id}" data-s="0" oninput="this.dataset.s=1">`)+`<div class="ends"><span>${esc(q.left_label)}</span><span>${esc(q.right_label)}</span></div></div>`;
 async function show(){
-  try{player&&player.destroy();}catch(e){}
-  if(ix>=S.videos.length){await api('/api/finish',{session:S.session});return app.innerHTML='<h2>Merci pour votre participation !</h2>';}
-  const v=S.videos[ix];ended=false;
-  app.innerHTML=`<progress value="${ix}" max="${S.videos.length}"></progress><h2>Vidéo ${ix+1} / ${S.videos.length}</h2><div id="yt"></div>`+(v.instruction?`<p><b>${esc(v.instruction)}</b></p>`:'')+`<p id="w"><i>Regardez la vidéo en entier pour accéder aux questions.</i></p><div id="qs" class="hide">${S.questions.map(qh).join('')}<button id="nx">Suivant</button></div>`;
-  player=new YT.Player('yt',{videoId:v.yt,playerVars:{rel:0,playsinline:1},events:{onStateChange:e=>{if(e.data===0){ended=true;$('#qs').classList.remove('hide');$('#w').remove();}}}});
+  clearInterval(timer);try{player&&player.destroy();}catch(e){}
+  if(ix>=S.videos.length){const f=await api('/api/finish',{session:S.session});
+    if(!f.ok)return app.innerHTML='<h2>Un problème est survenu</h2><p>Vos réponses n\'ont pas pu être validées. Rechargez la page, ou contactez l\'équipe de recherche.</p>';
+    prog(1e3);
+    const done=f.code?`<p>Pour valider votre participation sur Prolific, cliquez sur le bouton ci-dessous ou saisissez ce code de confirmation :</p><p><b class="code">${esc(f.code)}</b></p><p><a class="btn" href="https://app.prolific.com/submissions/complete?cc=${encodeURIComponent(f.code)}">Retourner sur Prolific</a></p>`:'<p>Vous pouvez fermer cette page.</p>';
+    return app.innerHTML='<h2>Merci pour votre participation !</h2><p>Vos réponses ont bien été enregistrées.</p>'+done;}
+  const v=S.videos[ix];ended=false;prog((E.consent?1:0)+3+(E.has_demo?1:0)+ix);
+  app.innerHTML=`<h2>Vidéo ${ix+1} / ${S.videos.length}</h2><div id="yt"></div><p><button id="pp">⏯ Lecture / Pause</button></p>`+(v.instruction?`<p class="note">${esc(v.instruction)}</p>`:'')+`<p id="w"><i>Regardez la vidéo en entier pour accéder aux questions.</i></p><div id="qs" class="hide">${S.questions.map(qh).join('')}<button id="nx">Suivant</button></div>`;
+  if(!isYT(v.yt))native(v);else player=new YT.Player('yt',{videoId:v.yt,playerVars:{rel:0,playsinline:1,controls:0,disablekb:1},events:{onError:()=>{const w=$('#w');if(w)w.textContent='Cette vidéo ne peut pas être lue. Rechargez la page ou contactez l\'équipe de recherche.';},onStateChange:e=>{if(e.data===0){ended=true;$('#qs').classList.remove('hide');$('#w').remove();}}}});
+  if(isYT(v.yt)){guard();$('#pp').onclick=()=>{try{player.getPlayerState()===1?player.pauseVideo():player.playVideo();}catch(e){}};}
   $('#nx').onclick=async()=>{
     const a={};
     for(const q of S.questions){
@@ -44,7 +132,7 @@ async function show(){
       if(!el||(q.kind==='slider'&&el.dataset.s!=='1'))return alert('Merci de répondre à toutes les questions (déplacez les curseurs).');
       a[q.id]=+el.value;
     }
-    await api('/api/answer',{session:S.session,video_id:v.id,answers:a,ended});ix++;show();
+    a._seeks=seeks;await api('/api/answer',{session:S.session,video_id:v.id,answers:a,ended});ix++;show();
   };
 }
 init();
