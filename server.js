@@ -43,7 +43,19 @@ const DEF_INSTR = "You will watch several short videos of a conversational agent
 const DEF_COMP = [{ q: "What should you do after each video?", options: ["Answer the questions", "Skip straight to the next video", "Close the page"], correct: 0 }];
 
 const DEF_CONSENT = "This study investigates how people perceive conversational agents. Your participation is voluntary and you may stop at any time by closing this page. Your responses are anonymous and will be used for research purposes only.";
-const slugify = s => String(s || '').toLowerCase().trim().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+const slugify = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+// Adresse d'une étude : déduite du nom (minuscules, tirets), unique, jamais purement numérique
+async function uniqueSlug(base, id) {
+  let s = base || 'study';
+  if (/^\d+$/.test(s) || ['admin', 'api'].includes(s)) s = 'study-' + s;
+  let n = 1, c = s;
+  while ((await q('select 1 from experiments where slug=$1 and id<>$2', [c, id])).length) c = s + '-' + (++n);
+  return c;
+}
+async function backfillSlugs() {
+  for (const e of await q(`select id,name from experiments where slug is null or slug = ''`)) await q('update experiments set slug=$1 where id=$2', [await uniqueSlug(slugify(e.name), e.id), e.id]);
+}
+const qScale = b => { const n = String(b.options || '').split(';').map(x => x.trim()).filter(Boolean).length; return b.kind === 'likert' && n >= 2 ? n : (b.scale || 7); };
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const FEATS = ['ability', 'gender', 'task', 'transcript'];
 
@@ -68,7 +80,7 @@ async function pick(e) {
 // ---- API participants
 app.get('/api/public', async (_, res) => res.json(await q('select id,name,slug from experiments where active order by id')));
 app.get('/api/public/:id', async (req, res) => {
-  const [e] = await q(`select id,name,instructions,comprehension,consent,n_videos,n_attention,exists(select 1 from questions where experiment_id=experiments.id and kind like 'demo%') as has_demo,slug,(n_target>0 and (select count(*) from sessions s where s.experiment_id=experiments.id and not s.rejected and (s.completed or s.created_at>now()-interval '2 hours'))>=n_target) as full from experiments where (slug=$1 or id::text=$1) and active order by (slug=$1) desc limit 1`, [req.params.id]);
+  const [e] = await q(`select id,name,instructions,comprehension,consent,n_videos,n_attention,exists(select 1 from questions where experiment_id=experiments.id and kind like 'demo%') as has_demo,slug,(n_target>0 and (select count(*) from sessions s where s.experiment_id=experiments.id and not s.rejected and (s.completed or s.created_at>now()-interval '2 hours'))>=n_target) as full from experiments where (slug=lower($1) or id::text=$1) and active order by (slug=lower($1)) desc limit 1`, [req.params.id]);
   if (!e) return res.status(404).json({});
   e.comprehension = e.comprehension.map(c => ({ q: c.q, options: c.options })); res.json(e);
 });
@@ -89,7 +101,7 @@ app.post('/api/answer', async (req, res) => {
   const [v] = await q('select v.* from videos v join assignments a on a.video_id=v.id where a.session_id=$1 and v.id=$2', [session, video_id]);
   if (!v) return res.status(400).json({});
   let ap = null;
-  if (v.attention) { const [f] = await q("select id from questions where experiment_id=$1 and kind='likert' order by pos limit 1", [v.experiment_id]); ap = !!f && Number(answers[f.id]) === v.expected; }
+  if (v.attention) { const fs = await q("select id from questions where experiment_id=$1 and kind='likert'", [v.experiment_id]); ap = fs.length > 0 && fs.every(f => Number(answers[f.id]) === v.expected); }
   await q('insert into responses(session_id,video_id,answers,ended,attention_passed) values($1,$2,$3,$4,$5) on conflict(session_id,video_id) do update set answers=$3,ended=$4,attention_passed=$5', [session, video_id, answers, !!ended, ap]);
   res.json({ ok: true });
 });
@@ -124,10 +136,14 @@ async function checkVideo(v) {
 // ---- API admin
 const A = '/api/admin';
 app.get(A + '/experiments', async (_, res) => res.json(await q('select * from experiments order by id')));
-app.post(A + '/experiments', async (req, res) => res.json((await q('insert into experiments(name,instructions,comprehension,consent) values($1,$2,$3,$4) returning *', [req.body.name || 'Nouvelle expérience', DEF_INSTR, JSON.stringify(DEF_COMP), DEF_CONSENT]))[0]));
+app.post(A + '/experiments', async (req, res) => {
+  const [e] = await q('insert into experiments(name,instructions,comprehension,consent) values($1,$2,$3,$4) returning *', [req.body.name || 'Nouvelle étude', DEF_INSTR, JSON.stringify(DEF_COMP), DEF_CONSENT]);
+  e.slug = await uniqueSlug(slugify(e.name), e.id);
+  await q('update experiments set slug=$1 where id=$2', [e.slug, e.id]); res.json(e);
+});
 app.put(A + '/experiments/:id', async (req, res) => {
   const b = req.body;
-  const slug = slugify(b.slug);
+  const slug = slugify(b.slug) || await uniqueSlug(slugify(b.name), req.params.id);
   if (slug && (['admin', 'api'].includes(slug) || /^\d+$/.test(slug) || (await q('select 1 from experiments where slug=$1 and id<>$2', [slug, req.params.id])).length)) return res.json({ error: 'slug' });
   res.json((await q('update experiments set name=$1,active=$2,n_videos=$3,n_attention=$4,instructions=$5,comprehension=$6,consent=$7,balance=$8,prolific_code=$9,n_target=$10,slug=$11 where id=$12 returning *', [b.name, b.active, b.n_videos, b.n_attention, b.instructions, JSON.stringify(b.comprehension), b.consent || '', b.balance || '', (b.prolific_code || '').trim(), parseInt(b.n_target) || 0, slug || null, req.params.id]))[0]);
 });
@@ -156,7 +172,7 @@ app.post(A + '/experiments/:id/verify', async (req, res) => {
   add(gn >= e.n_videos ? 'ok' : 'error', `${gn} vidéo(s) accessible(s) hors pièges pour ${e.n_videos} par participant`);
   if (e.n_attention) add(ga >= e.n_attention ? 'ok' : 'error', `${ga} vidéo(s) piège accessible(s) pour ${e.n_attention} par participant`);
   for (const f of (e.balance || '').split(',').filter(Boolean)) { const n = vs.filter(v => !v.attention && !v[f]).length; if (n) add('warn', `${n} vidéo(s) sans valeur pour l'aspect équilibré « ${f} »`); }
-  const first = qs.find(x => x.kind === 'likert');
+  const lik = qs.filter(x => x.kind === 'likert'), first = lik.length ? { scale: Math.min(...lik.map(x => x.scale)) } : null;
   if (!qs.some(x => x.kind === 'likert' || x.kind === 'slider')) add('error', 'Aucune question Likert ou slider après les vidéos');
   else add('ok', `${qs.length} question(s) configurée(s)`);
   if (vs.some(v => v.attention)) {
@@ -202,11 +218,11 @@ app.get(A + '/experiments/:id', async (req, res) => {
   });
 });
 app.post(A + '/experiments/:id/questions', async (req, res) => {
-  const b = req.body; await q('insert into questions(experiment_id,kind,text,left_label,right_label,scale,options) values($1,$2,$3,$4,$5,$6,$7)', [req.params.id, b.kind, b.text, b.left_label || '', b.right_label || '', b.scale || 7, b.options || '']); res.json({ ok: true });
+  const b = req.body; await q('insert into questions(experiment_id,kind,text,left_label,right_label,scale,options) values($1,$2,$3,$4,$5,$6,$7)', [req.params.id, b.kind, b.text, b.left_label || '', b.right_label || '', qScale(b), b.options || '']); res.json({ ok: true });
 });
 app.delete(A + '/questions/:id', async (req, res) => { await q('delete from questions where id=$1', [req.params.id]); res.json({ ok: true }); });
 app.put(A + '/questions/:id', async (req, res) => {
-  const b = req.body; await q('update questions set kind=$1,text=$2,left_label=$3,right_label=$4,scale=$5,options=$6 where id=$7', [b.kind, b.text, b.left_label || '', b.right_label || '', b.scale || 7, b.options || '', req.params.id]); res.json({ ok: true });
+  const b = req.body; await q('update questions set kind=$1,text=$2,left_label=$3,right_label=$4,scale=$5,options=$6 where id=$7', [b.kind, b.text, b.left_label || '', b.right_label || '', qScale(b), b.options || '', req.params.id]); res.json({ ok: true });
 });
 app.delete(A + '/videos/:id', async (req, res) => { await q('delete from videos where id=$1', [req.params.id]); res.json({ ok: true }); });
 // Format : url;capacité;genre;tâche;transcript[;réponse attendue Likert (=piège);consigne]
@@ -241,4 +257,4 @@ app.get(A + '/experiments/:id/export.csv', async (req, res) => {
 app.get('/admin', (_, res) => res.redirect('/admin.html'));
 app.get('/:slug', (req, res) => req.params.slug.includes('.') ? res.sendStatus(404) : res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-pool.query(SCHEMA).then(() => app.listen(process.env.PORT || 3000, () => console.log('OK'))).catch(e => { console.error(e); process.exit(1); });
+pool.query(SCHEMA).then(backfillSlugs).then(() => app.listen(process.env.PORT || 3000, () => console.log('OK'))).catch(e => { console.error(e); process.exit(1); });

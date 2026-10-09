@@ -33,9 +33,9 @@ input[type=radio],input[type=checkbox]{accent-color:var(--acc);width:1.1rem;heig
 .q{padding:1.1rem 0}.q+.q{border-top:1px solid var(--line)}
 .q>b{display:block;margin-bottom:.8rem;font-size:1.05rem}
 .lk{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:6px}
-.lk label{display:block;position:relative}
+.lk label{display:flex;position:relative}
 .lk input{position:absolute;opacity:0;inset:0;width:100%;height:100%;margin:0;cursor:pointer}
-.lk span{display:block;text-align:center;padding:.7rem 0;border:1.5px solid var(--line);border-radius:10px;font-weight:700;color:var(--mute);transition:background .15s,color .15s,border-color .15s}
+.lk span{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.25;font-size:.92rem;padding:.6rem .25rem;overflow-wrap:anywhere;border:1.5px solid var(--line);border-radius:10px;font-weight:700;color:var(--mute);transition:background .15s,color .15s,border-color .15s}
 .lk label:hover span{border-color:var(--acc)}
 .lk input:checked+span{background:var(--acc);border-color:var(--acc);color:var(--acc-ink)}
 .lk input:focus-visible+span{outline:3px solid var(--acc);outline-offset:2px}
@@ -55,6 +55,7 @@ input[type=range][data-s="0"]::-moz-range-thumb{background:var(--sheet);box-shad
 #qs{margin-top:.8rem}#nx{margin-top:.6rem}
 a.btn{display:inline-block;font-weight:700;border-radius:12px;padding:.7rem 1.4rem;background:var(--acc);color:var(--acc-ink);text-decoration:none}
 .code{font-size:1.6rem;letter-spacing:.08em;background:var(--soft);padding:.4rem 1rem;border-radius:10px;display:inline-block;user-select:all}
+@media (max-width:560px){.lk.txt{grid-auto-flow:row}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 <div class="wrap"><header><h1 id="title"></h1><div id="pb" class="hide"><progress id="gp" value="0" max="1"></progress><small id="gl"></small></div></header>
@@ -64,10 +65,10 @@ const $=s=>document.querySelector(s),app=$('#app'),qp=new URLSearchParams(locati
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const api=(u,b)=>fetch(u,b?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}:{}).then(r=>r.json());
 let E,S,ix=0,attempts=1,audioOk=false,ended=false,player,consented=false,mx=0,seeks=0,timer;
+function gone(){document.body.style.cssText='background:#fff;color:#111;margin:0';document.body.innerHTML='<p style="font:700 1.1rem/1.4 system-ui,sans-serif;text-align:center;padding:30vh 1rem 0">PLEASE GO BACK TO PROLIFIC TO GET THE RIGHT LINK FOR YOUR STUDY</p>';}
 async function init(){
-  let key=eid;
-  if(!key){const l=await api('/api/public');if(l.length!==1)return app.innerHTML=l.length?l.map(x=>`<p><a href="/${x.slug||x.id}${location.search}">${esc(x.name)}</a></p>`).join(''):'No study is currently open.';key=l[0].id;}
-  E=await api('/api/public/'+encodeURIComponent(key));if(!E.id)return app.textContent='Study not found.';if(E.full)return app.innerHTML='<h2>This study is full</h2><p>All the places have been filled. Thank you for your interest.</p>';
+  if(!eid)return gone();
+  E=await api('/api/public/'+encodeURIComponent(eid));if(!E.id)return gone();if(E.full)return app.innerHTML='<h2>This study is full</h2><p>All the places have been filled. Thank you for your interest.</p>';
   $('#title').textContent=E.name;E.consent?consent():intro();
 }
 function prog(k){const c=E.consent?1:0,d=E.has_demo?1:0,V=S?S.videos.length:E.n_videos+E.n_attention,tot=c+3+d+V;$('#pb').classList.remove('hide');$('#gp').max=tot;$('#gp').value=Math.min(k,tot);$('#gl').textContent=k>=tot?'Done':`Step ${k+1} / ${tot}`;}
@@ -75,7 +76,7 @@ function consent(){prog(0);
   app.innerHTML=`<h2>Consent</h2><div style="white-space:pre-wrap">${esc(E.consent)}</div><label class="opt"><input type="checkbox" id="c"> I have read this information and agree to take part.</label><p><button id="b" disabled>Continue</button> <button id="r">I do not agree</button></p>`;
   $('#c').onchange=()=>$('#b').disabled=!$('#c').checked;
   $('#b').onclick=()=>{consented=true;intro();};
-  $('#r').onclick=()=>app.innerHTML='<p>Thank you. You have chosen not to take part.</p>';
+  $('#r').onclick=()=>app.innerHTML='<h2>Thank you</h2><p>You have chosen not to take part in this study. Please return the study on Prolific and close this page.</p>';
 }
 function intro(){prog(E.consent?1:0);app.innerHTML=`<div style="white-space:pre-wrap">${esc(E.instructions)}</div><p><button id="b">Continue</button></p>`;$('#b').onclick=()=>audio();}
 function beep(n){const c=new(window.AudioContext||window.webkitAudioContext)();for(let i=0;i<n;i++){const o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=660;g.gain.value=.3;o.start(c.currentTime+i*.6);o.stop(c.currentTime+i*.6+.3);}}
@@ -114,7 +115,7 @@ function native(v){
   $('#pp').onclick=()=>el.paused?el.play():el.pause();
 }
 function loadYT(){return new Promise(r=>{if(window.YT&&YT.Player)return r();window.onYouTubeIframeAPIReady=r;const s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';document.head.appendChild(s);});}
-const qh=q=>`<div class="q"><b>${esc(q.text)}</b>`+(q.kind==='likert'?`<div class="lk">${Array.from({length:q.scale},(_,i)=>`<label><input type="radio" name="q${q.id}" value="${i+1}"><span>${i+1}</span></label>`).join('')}</div>`:`<input type="range" min="0" max="100" value="50" name="q${q.id}" data-s="0" oninput="this.dataset.s=1">`)+`<div class="ends"><span>${esc(q.left_label)}</span><span>${esc(q.right_label)}</span></div></div>`;
+const qh=q=>`<div class="q"><b>${esc(q.text)}</b>`+(q.kind==='likert'?`<div class="lk${(q.options||'').includes(';')?' txt':''}">${Array.from({length:q.scale},(_,i)=>`<label><input type="radio" name="q${q.id}" value="${i+1}"><span>${(q.options||'').split(';')[i]?.trim()||i+1}</span></label>`).join('')}</div>`:`<input type="range" min="0" max="100" value="50" name="q${q.id}" data-s="0" oninput="this.dataset.s=1">`)+`<div class="ends"><span>${esc(q.left_label)}</span><span>${esc(q.right_label)}</span></div></div>`;
 async function show(){
   clearInterval(timer);try{player&&player.destroy();}catch(e){}
   if(ix>=S.videos.length){const f=await api('/api/finish',{session:S.session});

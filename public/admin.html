@@ -13,10 +13,10 @@ async function load(){
   $('#main').innerHTML=`${banner()}<p><button id="vx" onclick="verify()">Vérifier l'expérience</button></p>${RP&&RP.cur===cur?repHtml():''}
 <h2>Paramètres</h2>
 <p>Lien participants : <a href="/${e.slug||id}" target="_blank">${location.origin}/${e.slug||id}</a> · <a href="/api/admin/experiments/${id}/export.csv">Exporter les réponses (CSV)</a> · Participants : ${d.sessions.total} démarrés, ${d.sessions.done} terminés, ${d.sessions.attfail} avec au moins un piège raté, ${d.sessions.rej} refusé(s)</p>
-<p>Lien à donner à Prolific : <code>${esc(location.origin+'/'+(e.slug||id)+'?PROLIFIC_PID={{%PROLIFIC_PID%}}&STUDY_ID={{%STUDY_ID%}}&SESSION_ID={{%SESSION_ID%}}')}</code></p>
+<p>Lien à donner à Prolific : <code>${esc(location.origin+'/'+(e.slug||id)+'?PROLIFIC_PID={{%PROLIFIC_PID%}}&STUDY_ID={{%STUDY_ID%}}&SESSION_ID={{%SESSION_ID%}}')}</code> <button onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent)">Copier</button></p>
 <label>Nom <input id="nm" value="${esc(e.name)}"></label>
 <label><input type="checkbox" id="ac" ${e.active?'checked':''}> Expérience active</label>
-<label>Adresse courte (ex. « pilote » donne ${location.origin}/pilote ; vide = numéro ${id})<input id="sl" value="${esc(e.slug)}"></label>
+<label>Adresse de l'étude (vide = déduite du nom ; donne ${location.origin}/votre-adresse)<input id="sl" value="${esc(e.slug)}"></label>
 <label>Participants prévus pour l'équilibrage (0 = illimité ; l'étude se ferme une fois atteint)<input id="nt" type="number" value="${e.n_target||0}"></label>
 <label>Vidéos par participant (hors pièges) <input id="nv" type="number" value="${e.n_videos}"></label>
 <label>Vidéos pièges par participant <input id="na" type="number" value="${e.n_attention}"></label>
@@ -28,16 +28,16 @@ async function load(){
 <button onclick="save()">Enregistrer</button> <button onclick="del()">Supprimer l'expérience</button>
 <h2>Questions posées après chaque vidéo</h2>
 <ol>${d.questions.map(q=>`<li>[${q.kind}${q.kind=='likert'?' '+q.scale+' pts':''}] ${esc(q.text)} (${esc(q.left_label)} → ${esc(q.right_label)}) ${esc(q.options)} <button onclick="editQ(${q.id})">✎</button> <button onclick="rm('questions',${q.id})">✕</button></li>`).join('')}</ol>
-<p class="row"><select id="qk"><option value="likert">Likert</option><option value="slider">Slider</option><option value="demo_text">Démographie : texte libre</option><option value="demo_choice">Démographie : choix</option></select> <input id="qt" placeholder="Texte" style="width:30%"> <input id="ql" placeholder="Libellé gauche" style="width:15%"> <input id="qr" placeholder="Libellé droite" style="width:15%"> <input id="qs" type="number" value="7" style="width:4rem" title="Points Likert"> <input id="qo" placeholder="Choix (séparés par ;)" style="width:20%"> <button id="qb" onclick="addQ()">Ajouter</button></p>
-<small>Les vidéos pièges sont validées sur la 1re question Likert.</small>
+<p class="row"><select id="qk"><option value="likert">Likert</option><option value="slider">Slider</option><option value="demo_text">Démographie : texte libre</option><option value="demo_choice">Démographie : choix</option></select> <input id="qt" placeholder="Texte" style="width:30%"> <input id="ql" placeholder="Libellé gauche" style="width:15%"> <input id="qr" placeholder="Libellé droite" style="width:15%"> <input id="qs" type="number" value="7" style="width:4rem" title="Points Likert"> <input id="qo" placeholder="Libellés des boutons Likert, ou choix (démographie), séparés par ;" style="width:32%"> <button id="qb" onclick="addQ()">Ajouter</button></p>
+<small>Likert : si vous saisissez des libellés (ex. Strongly disagree;Disagree;Neutral;Agree;Strongly agree), il y a un bouton par libellé et le nombre de points est ignoré ; sinon les boutons sont numérotés. Les vidéos pièges sont validées sur toutes les questions Likert (même réponse attendue partout).</small>
 <h2>Vidéos (${d.videos.length})</h2>
 <p><button id="ck" onclick="check()">Vérifier l'accessibilité des vidéos</button> ${ckSummary()}</p>
 <div><b>Réponses par modalité</b>${[...new Set(d.bal.map(x=>x.f))].map(f=>`<div>${f} : ${d.bal.filter(x=>x.f===f).map(x=>`${esc(x.v)||'—'} <b>${x.n}</b>`).join(' · ')}</div>`).join('')}</div>
 <table><tr><th>YouTube</th><th>Niveau</th><th>Genre</th><th>Tâche</th><th>Transcript</th><th>Dimension</th><th>Piège</th><th>Assignées</th><th>Réponses</th><th>Pièges OK</th><th>Accès</th><th></th></tr>
 ${d.videos.map(v=>`<tr style="${v.checked_at&&!v.check_ok?'background:#fde8e8':''}"><td><a href="${isYT(v.yt)?'https://youtu.be/':''}${v.yt}" target="_blank">${isYT(v.yt)?v.yt:'lien direct'}</a></td><td>${esc(v.ability)}</td><td>${esc(v.gender)}</td><td>${esc(v.task)}</td><td>${esc(v.transcript)}</td><td>${esc(v.dimension)}</td><td>${v.attention?'attendu : '+v.expected:''}</td><td>${v.assigned}</td><td>${v.answered}${!v.attention&&quotaOf(e,d)?' / '+quotaOf(e,d):''}</td><td>${v.attention?v.att_ok:''}</td><td>${v.checked_at?(v.check_ok?'✅':'❌')+' <small>'+esc(v.check_detail)+'</small>':'—'}</td><td><button onclick="editV(${v.id})">✎</button> <button onclick="rm('videos',${v.id})">✕</button></td></tr>`).join('')}</table>
 <h3>Ajouter des vidéos (une par ligne)</h3>
-<small>url;niveau;genre;tâche;transcript;dimension[;réponse attendue Likert (= vidéo piège);consigne affichée]</small>
-<textarea id="vt" rows="5" placeholder="https://youtu.be/XXXXXXXXXXX;High;F;QA;neutre;ability&#10;https://youtu.be/YYYYYYYYYYY;Low;M;Navigation;F;benevolence;2;Pour cette vidéo, répondez 2 à la première question"></textarea>
+<small>url;niveau;genre;tâche;transcript;dimension[;réponse attendue à toutes les questions Likert (= vidéo piège);consigne facultative affichée sous la vidéo]</small>
+<textarea id="vt" rows="5" placeholder="https://youtu.be/XXXXXXXXXXX;High;F;QA;neutre;ability&#10;https://youtu.be/YYYYYYYYYYY;Low;M;Navigation;F;benevolence;2"></textarea>
 <button id="vb" onclick="addV()">Ajouter</button>
 <h2>Participants</h2>
 <p>${targetLine(e,d)}</p>
