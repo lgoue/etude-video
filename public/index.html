@@ -53,7 +53,9 @@ input[type=range][data-s="0"]::-moz-range-thumb{background:var(--sheet);box-shad
 #w{color:var(--mute);font-size:.95rem}
 .note{background:var(--soft);border-left:4px solid var(--acc);padding:.7rem 1rem;border-radius:0 10px 10px 0;margin:1rem 0}
 .sec+.sec{border-top:3px solid var(--acc);margin-top:2.6rem;padding-top:1.2rem}
-.sec h3{margin:.4rem 0 .3rem;font-size:1.35rem;line-height:1.3;color:var(--ink);padding-left:.7rem;border-left:5px solid var(--acc)}
+.sec h3{margin:.4rem 0 .3rem;font-size:1.35rem;line-height:1.3;color:var(--ink);padding:.35rem 0 .35rem .7rem;border-left:5px solid var(--acc);background:var(--sheet);position:sticky;top:calc(var(--hh,0px) + var(--nh,0px));z-index:3;box-shadow:0 6px 8px -6px rgba(20,30,45,.18)}
+/* Consigne de la vidéo répétée au-dessus des questions, qui reste visible en défilant (titres de section juste en dessous) */
+.note.stick{position:sticky;top:var(--hh,0px);z-index:4;margin:0 0 .8rem;max-height:30vh;overflow:auto;border-radius:0 0 10px 0;box-shadow:0 -6px 0 var(--sheet)}
 #qs{margin-top:.8rem}#nx{margin-top:.6rem}
 a.btn{display:inline-block;font-weight:700;border-radius:12px;padding:.7rem 1.4rem;background:var(--acc);color:var(--acc-ink);text-decoration:none}
 .code{font-size:1.6rem;letter-spacing:.08em;background:var(--soft);padding:.4rem 1rem;border-radius:10px;display:inline-block;user-select:all}
@@ -66,8 +68,11 @@ a.btn{display:inline-block;font-weight:700;border-radius:12px;padding:.7rem 1.4r
 const $=s=>document.querySelector(s),app=$('#app'),qp=new URLSearchParams(location.search),eid=qp.get('e')||decodeURIComponent(location.pathname.replace(/^\/+|\/+$/g,'').replace(/^index\.html$/,'')),PL={pid:qp.get('PROLIFIC_PID')||'',study:qp.get('STUDY_ID')||'',session:qp.get('SESSION_ID')||''};
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const api=async(u,b,n=0)=>{try{const r=await fetch(u,b?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}:{});return await r.json();}catch(e){if(n<4){await new Promise(r=>setTimeout(r,1000*2**n));return api(u,b,n+1);}throw e;}};
+// Décalages des éléments collants : hauteur de l'en-tête (barre de progression) et de la consigne collante
+const stickH=()=>{const d=document.documentElement.style,n=document.querySelector('#qs .stick');d.setProperty('--hh',document.querySelector('header').offsetHeight+'px');d.setProperty('--nh',(n?n.offsetHeight:0)+'px');};
+addEventListener('scroll',stickH,{passive:true});addEventListener('resize',stickH);
 // Retour en haut à chaque nouvelle page (contenu de #app remplacé ; une simple suppression, ex. fin de vidéo, ne compte pas)
-new MutationObserver(m=>{if(m.some(x=>x.addedNodes.length))scrollTo(0,0);}).observe(app,{childList:true});
+new MutationObserver(m=>{if(m.some(x=>x.addedNodes.length))scrollTo(0,0);stickH();}).observe(app,{childList:true});
 window.addEventListener('unhandledrejection',()=>alert('Connection problem. Please check your internet connection and reload this page: the answers you have already submitted are saved, and you will be able to continue where you left off.'));
 let E,S,ix=0,attempts=1,audioOk=false,ended=false,player,consented=false,mx=0,seeks=0,timer,demoDone=false,doneBlocks=new Set();
 // Deux parties : E.first = partie montrée en premier (ordre éventuellement tiré au hasard par le serveur)
@@ -187,7 +192,7 @@ async function show(){
     try{localStorage.removeItem('s'+E.id);}catch(e){}return finishScreen(f.code);}
   const v=S.videos[ix],blk=arrange(S.videos[ix].part||1);ended=false;prog(step());
   if(ix>=k1()&&!S.comp2Done)return partIntro(v.part||1);
-  app.innerHTML=`<h2>Video ${ix+1} / ${S.videos.length}</h2><div id="yt"></div><p><button id="pp">⏯ Play / Pause</button></p>`+(v.instruction?`<p class="note">${esc(v.instruction)}</p>`:'')+`<p id="w"><i>Please watch the whole video to unlock the questions.</i></p><div id="qs" class="hide">${blk.html}<button id="nx">Next</button></div>`;
+  app.innerHTML=`<h2>Video ${ix+1} / ${S.videos.length}</h2><div id="yt"></div><p><button id="pp">⏯ Play / Pause</button></p>`+(v.instruction?`<p class="note">${esc(v.instruction)}</p>`:'')+`<p id="w"><i>Please watch the whole video to unlock the questions.</i></p><div id="qs" class="hide">${v.instruction?`<div class="note stick">${esc(v.instruction)}</div>`:''}${blk.html}<button id="nx">Next</button></div>`;
   if(!isYT(v.yt))native(v);else player=new YT.Player('yt',{videoId:v.yt,playerVars:{rel:0,playsinline:1,controls:0,disablekb:1},events:{onError:()=>{const w=$('#w');if(w)w.textContent='This video cannot be played. Please reload the page or contact the research team.';},onStateChange:e=>{if(e.data===0){ended=true;$('#qs').classList.remove('hide');$('#w').remove();}}}});
   if(isYT(v.yt)){guard();$('#pp').onclick=()=>{try{player.getPlayerState()===1?player.pauseVideo():player.playVideo();}catch(e){}};}
   $('#nx').onclick=async()=>{
