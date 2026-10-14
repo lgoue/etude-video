@@ -109,7 +109,8 @@ function collect(qs){const a={};for(const q of qs){const el=q.kind==='likert'?do
 function blockPage(b){
   const blk=arrange(1,b.questions,b.shuffle,b.shuffle_sections);
   prog(step());
-  app.innerHTML=(b.title?`<h2>${esc(b.title)}</h2>`:'')+(b.intro?`<div style="white-space:pre-wrap">${esc(b.intro)}</div>`:'')+`<div id="qs">${blk.html}<button id="nx">Next</button></div>`;
+  // Le titre du questionnaire reste interne (admin, export) : il n'est pas montré au participant
+  app.innerHTML=(b.intro?`<div style="white-space:pre-wrap">${esc(b.intro)}</div>`:'')+`<div id="qs">${blk.html}<button id="nx">Next</button></div>`;
   $('#nx').onclick=async()=>{const a=collect(b.questions);if(!a)return;await api('/api/block',{session:S.session,block_id:b.id,answers:a,order:blk.order});doneBlocks.add(b.id);show();};
 }
 function gone(){document.body.style.cssText='background:#fff;color:#111;margin:0';document.body.innerHTML='<p style="font:700 1.1rem/1.4 system-ui,sans-serif;text-align:center;padding:30vh 1rem 0">PLEASE GO BACK TO PROLIFIC TO GET THE RIGHT LINK FOR YOUR STUDY</p>';}
