@@ -94,7 +94,7 @@ function pendingBlock(){
 }
 function collect(qs){const a={};for(const q of qs){const el=q.kind==='likert'?document.querySelector(`input[name=q${q.id}]:checked`):document.querySelector(`input[name=q${q.id}]`);if(!el||(q.kind==='slider'&&el.dataset.s!=='1')){alert('Please answer all the questions (move every slider).');return null;}a[q.id]=+el.value;}return a;}
 function blockPage(b){
-  const blk=arrange(1,b.questions,b.shuffle);
+  const blk=arrange(1,b.questions,b.shuffle,b.shuffle_sections);
   prog((E.consent?1:0)+3+ix+doneBlocks.size);
   app.innerHTML=(b.title?`<h2>${esc(b.title)}</h2>`:'')+(b.intro?`<div style="white-space:pre-wrap">${esc(b.intro)}</div>`:'')+`<div id="qs">${blk.html}<button id="nx">Next</button></div>`;
   $('#nx').onclick=async()=>{const a=collect(b.questions);if(!a)return;await api('/api/block',{session:S.session,block_id:b.id,answers:a,order:blk.order});doneBlocks.add(b.id);show();};
@@ -155,9 +155,11 @@ function native(v){
 function loadYT(){return new Promise(r=>{if(window.YT&&YT.Player)return r();window.onYouTubeIframeAPIReady=r;const s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';document.head.appendChild(s);});}
 const qh=q=>`<div class="q"><b>${esc(q.text)}</b>`+(q.kind==='likert'?`<div class="lk${(q.options||'').includes(';')?' txt':''}">${Array.from({length:q.scale},(_,i)=>`<label><input type="radio" name="q${q.id}" value="${i+1}"><span>${(q.options||'').split(';')[i]?.trim()||i+1}</span></label>`).join('')}</div>`:`<input type="range" min="0" max="100" value="50" name="q${q.id}" data-s="0" oninput="this.dataset.s=1">`)+`<div class="ends"><span>${esc(q.left_label)}</span><span>${esc(q.right_label)}</span></div></div>`;
 // Sections séparées par une ligne ; les questions cochées « aléatoire » sont mélangées entre elles à l'intérieur de leur section, à chaque vidéo
-function arrange(part,list,all){
+// shufSec : l'ordre des sections elles-mêmes est tiré au hasard (questionnaires sans vidéo)
+function arrange(part,list,all,shufSec){
   const g=[];(list||S.questions.filter(q=>(q.part||1)===part)).forEach(q=>{const n=q.section||'';let x=g.find(y=>y.n===n);if(!x)g.push(x={n,l:[]});x.l.push(q);});
   g.forEach(x=>{const idx=x.l.map((q,i)=>(all||q.shuffle)?i:-1).filter(i=>i>=0),f=idx.map(i=>x.l[i]);for(let i=f.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[f[i],f[j]]=[f[j],f[i]];}idx.forEach((p,k)=>x.l[p]=f[k]);});
+  if(shufSec)for(let i=g.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[g[i],g[j]]=[g[j],g[i]];}
   return{order:g.flatMap(x=>x.l.map(q=>q.id)),html:g.map(x=>`<div class="sec">${x.n?`<h3>${esc(x.n)}</h3>`:''}${x.l.map(qh).join('')}</div>`).join('')};
 }
 async function show(){
