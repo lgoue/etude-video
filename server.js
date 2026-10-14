@@ -60,7 +60,8 @@ alter table experiments add column if not exists comprehension2 jsonb default '[
 alter table experiments add column if not exists random_parts bool default false;
 alter table sessions add column if not exists part_order text;
 alter table sessions add column if not exists comp2_attempts int default 0;
-alter table sessions add column if not exists comp2_ok bool default false;`;
+alter table sessions add column if not exists comp2_ok bool default false;
+alter table experiments add column if not exists qa jsonb default '{}';`;
 
 const DEF_INSTR = "You will watch several short videos of a conversational agent. Please watch each video in full with the sound on, then answer the questions that follow.\nThere are no right or wrong answers: we are interested in your personal impression.";
 const DEF_COMP = [{ q: "What should you do after each video?", options: ["Answer the questions", "Skip straight to the next video", "Close the page"], correct: 0 }];
@@ -87,6 +88,39 @@ async function loadBlocks(eid) {
 }
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const FEATS = ['ability', 'gender', 'task', 'transcript'];
+// Tâche QA : question (CSV importé, clé = numéro de question) affichée avant la vidéo.
+// Réponse A = answer 1 et B = answer 2 si le numéro est pair, l'inverse s'il est impair.
+const isQA = v => /^qa$/i.test(String(v.task || '').trim());
+function qaOf(e, v) {
+  const x = isQA(v) && (e.qa || {})[String(v.question_no || '').trim()];
+  if (!x) return null;
+  const even = parseInt(v.question_no) % 2 === 0;
+  return { question: x.q, a: even ? x.a1 : x.a2, b: even ? x.a2 : x.a1 };
+}
+// CSV avec guillemets (séparateur virgule, point-virgule ou tabulation, déduit de la première ligne)
+function parseCSV(text) {
+  const t = String(text || '').replace(/^\ufeff/, ''), first = t.split('\n')[0];
+  const sep = first.includes('\t') ? '\t' : (first.split(';').length > first.split(',').length ? ';' : ',');
+  const rows = []; let row = [], f = '', qt = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (qt) { if (c === '"') { if (t[i + 1] === '"') { f += '"'; i++; } else qt = false; } else f += c; }
+    else if (c === '"') qt = true;
+    else if (c === sep) { row.push(f); f = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && t[i + 1] === '\n') i++; row.push(f); rows.push(row); row = []; f = ''; }
+    else f += c;
+  }
+  if (f || row.length) { row.push(f); rows.push(row); }
+  return rows.map(r => r.map(x => x.trim())).filter(r => r.some(Boolean));
+}
+function parseQA(text) {
+  const rows = parseCSV(text), h = (rows.shift() || []).map(normCol);
+  const col = (re, d) => { const i = h.findIndex(x => re.test(x)); return i < 0 ? d : i; };
+  const ci = col(/(^|_)(id|n_question|question_no|numero|number)($|_)/, 0), cq = col(/^question$/, 1), c1 = col(/(answer|reponse)_?1/, 2), c2 = col(/(answer|reponse)_?2/, 3);
+  const qa = {}, bad = [];
+  rows.forEach(r => { const id = String(parseInt(r[ci])); if (id === 'NaN' || !r[cq] || !r[c1] || !r[c2]) bad.push(r.join(' | ')); else qa[id] = { q: r[cq], a1: r[c1], a2: r[c2] }; });
+  return { qa, bad };
+}
 // Consignes et questions de compréhension propres à chaque partie
 const compOf = (e, part) => (part === 2 ? e.comprehension2 : e.comprehension) || [];
 const compOk = (list, a) => list.every((c, i) => (a || [])[i] === c.correct);
@@ -145,7 +179,7 @@ app.post('/api/start', async (req, res) => {
   await q('insert into sessions(id,experiment_id,audio_ok,comp_attempts,consent,prolific_pid,prolific_study,prolific_session,part_order) values($1,$2,$3,$4,$5,$6,$7,$8,$9)', [id, e.id, !!audio_ok, attempts || 1, !!consent, ...['pid', 'study', 'session'].map(k => String(pl[k] || '').slice(0, 100) || null), order]);
   for (let i = 0; i < vids.length; i++) await q('insert into assignments values($1,$2,$3)', [id, vids[i].id, i]);
   const qs = await q('select id,kind,text,left_label,right_label,scale,options,section,shuffle,part from questions where experiment_id=$1 and block_id is null order by pos', [e.id]);
-  res.json({ ok: true, session: id, blocks: await loadBlocks(e.id), questions: qs.filter(x => !x.kind.startsWith('demo')), demo: qs.filter(x => x.kind.startsWith('demo')), videos: vids.map(v => ({ id: v.id, yt: v.yt, instruction: v.instruction, part: v.part })) });
+  res.json({ ok: true, session: id, blocks: await loadBlocks(e.id), questions: qs.filter(x => !x.kind.startsWith('demo')), demo: qs.filter(x => x.kind.startsWith('demo')), videos: vids.map(v => ({ id: v.id, yt: v.yt, instruction: v.instruction, part: v.part, qa: qaOf(e, v) })) });
 });
 app.post('/api/answer', async (req, res) => {
   const { session, video_id, answers, ended } = req.body;
@@ -174,13 +208,13 @@ app.post('/api/comp2', async (req, res) => {
 // Reprise : un participant qui revient (même PROLIFIC_PID, ou même navigateur) retrouve sa session et ses réponses
 app.post('/api/resume', async (req, res) => {
   const { experiment_id, pid, token } = req.body;
-  const [e] = await q('select id,prolific_code from experiments where id=$1 and active', [experiment_id]); if (!e) return res.json({});
+  const [e] = await q('select id,prolific_code,qa from experiments where id=$1 and active', [experiment_id]); if (!e) return res.json({});
   const p = String(pid || '').slice(0, 100), t = String(token || '').slice(0, 64);
   if (p && (await q('select 1 from sessions where experiment_id=$1 and prolific_pid=$2 and completed and not rejected limit 1', [e.id, p])).length) return res.json({ finished: true, code: e.prolific_code || '' });
   const [s] = await q('select * from sessions where experiment_id=$1 and not completed and not rejected and ((prolific_pid is not null and prolific_pid=$2) or id=$3) order by created_at desc limit 1', [e.id, p, t]);
   if (!s) return res.json({});
   await q('update sessions set last_seen=now() where id=$1', [s.id]);
-  const videos = await q('select v.id,v.yt,v.instruction,v.part from videos v join assignments a on a.video_id=v.id where a.session_id=$1 order by a.pos', [s.id]);
+  const videos = (await q('select v.id,v.yt,v.instruction,v.part,v.task,v.question_no from videos v join assignments a on a.video_id=v.id where a.session_id=$1 order by a.pos', [s.id])).map(v => ({ id: v.id, yt: v.yt, instruction: v.instruction, part: v.part, qa: qaOf(e, v) }));
   const answered = (await q('select video_id from responses where session_id=$1', [s.id])).map(r => r.video_id);
   const qs = await q('select id,kind,text,left_label,right_label,scale,options,section,shuffle,part from questions where experiment_id=$1 and block_id is null order by pos', [e.id]);
   res.json({ resume: true, session: s.id, blocks: await loadBlocks(e.id), blocksDone: Object.keys(s.blocks || {}).map(Number), questions: qs.filter(x => !x.kind.startsWith('demo')), demo: qs.filter(x => x.kind.startsWith('demo')), demoDone: Object.keys(s.demo || {}).length > 0, comp2Done: !!s.comp2_ok, videos, answered });
@@ -270,6 +304,8 @@ app.post(A + '/experiments/:id/verify', async (req, res) => {
     if (e.n_videos2 && !qs.some(x => x.part === part && (x.kind === 'likert' || x.kind === 'slider'))) add('error', `${tag}aucune question Likert ou slider pour cette partie`);
     if (vs.some(v => v.part === part && v.attention) && !qs.some(x => x.part === part && x.kind === 'likert')) add('error', `${tag}des vidéos pièges existent mais aucune question Likert dans cette partie`);
   }
+  const qaV = vs.filter(isQA), qaMiss = qaV.filter(v => !qaOf(e, v));
+  if (qaV.length) add(qaMiss.length ? 'error' : 'ok', qaMiss.length ? `${qaMiss.length} vidéo(s) QA sans question correspondante dans le CSV des questions QA (numéro de question vide ou absent) : ${qaMiss.slice(0, 8).map(lab).join(', ')}${qaMiss.length > 8 ? '…' : ''}` : `${qaV.length} vidéo(s) QA, toutes avec leur question`);
   for (const f of (e.balance || '').split(',').filter(Boolean)) { const n = vs.filter(v => !v.attention && f.split('+').some(k => !v[k])).length; if (n) add('warn', `${n} vidéo(s) sans valeur pour l'aspect équilibré « ${f} »`); }
   const lik = qs.filter(x => x.kind === 'likert'), first = lik.length ? { scale: Math.min(...lik.map(x => x.scale)) } : null;
   if (!qs.some(x => x.kind === 'likert' || x.kind === 'slider')) add('error', 'Aucune question Likert ou slider après les vidéos');
@@ -332,8 +368,8 @@ app.post(A + '/experiments/:id/copy', async (req, res) => {
     if (!src) return res.status(404).json({});
     const name = String(req.body.name || '').trim() || src.name + ' (copie)', slug = await uniqueSlug(slugify(name), 0);
     await c.query('begin');
-    const { rows: [e] } = await c.query(`insert into experiments(name,slug,active,n_videos,n_attention,instructions,comprehension,consent,balance,prolific_code,n_target,n_videos2,n_attention2,intro2,comprehension2,random_parts)
-      select $2::text,$3::text,false,n_videos,n_attention,instructions,comprehension,consent,balance,'',n_target,n_videos2,n_attention2,intro2,comprehension2,random_parts from experiments where id=$1 returning *`, [src.id, name, slug]);
+    const { rows: [e] } = await c.query(`insert into experiments(name,slug,active,n_videos,n_attention,instructions,comprehension,consent,balance,prolific_code,n_target,n_videos2,n_attention2,intro2,comprehension2,random_parts,qa)
+      select $2::text,$3::text,false,n_videos,n_attention,instructions,comprehension,consent,balance,'',n_target,n_videos2,n_attention2,intro2,comprehension2,random_parts,qa from experiments where id=$1 returning *`, [src.id, name, slug]);
     const bmap = {};
     for (const b of (await c.query('select * from blocks where experiment_id=$1 order by pos', [src.id])).rows) bmap[b.id] = (await c.query('insert into blocks(experiment_id,title,intro,slot,shuffle,shuffle_sections) values($1,$2,$3,$4,$5,$6) returning id', [e.id, b.title, b.intro, b.slot, b.shuffle, b.shuffle_sections])).rows[0].id;
     for (const x of (await c.query('select * from questions where experiment_id=$1 order by pos', [src.id])).rows) await c.query('insert into questions(experiment_id,kind,text,left_label,right_label,scale,options,section,shuffle,part,block_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [e.id, x.kind, x.text, x.left_label, x.right_label, x.scale, x.options, x.section, x.shuffle, x.part, x.block_id ? bmap[x.block_id] : null]);
@@ -380,6 +416,7 @@ app.post(A + '/questions/:id/move', async (req, res) => {
   res.json({ ok: true });
 });
 app.post(A + '/experiments/:id/section-shuffle', async (req, res) => { await q("update questions set shuffle=$1 where experiment_id=$2 and coalesce(section,'')=$3 and part=$4 and block_id is null and kind not like 'demo%'", [!!req.body.shuffle, req.params.id, req.body.section || '', req.body.part === 2 ? 2 : 1]); res.json({ ok: true }); });
+app.put(A + '/experiments/:id/qa', async (req, res) => { const { qa, bad } = parseQA(req.body.text); await q('update experiments set qa=$1 where id=$2', [qa, req.params.id]); res.json({ n: Object.keys(qa).length, bad }); });
 app.delete(A + '/experiments/:id/videos', async (req, res) => res.json({ n: (await q('delete from videos where experiment_id=$1 returning id', [req.params.id])).length }));
 app.delete(A + '/videos/:id', async (req, res) => { await q('delete from videos where id=$1', [req.params.id]); res.json({ ok: true }); });
 // Import de vidéos : avec ligne d'en-tête (colonnes nommées, dans n'importe quel ordre) ou sans (ordre fixe).
@@ -426,8 +463,9 @@ app.put(A + '/videos/:id', async (req, res) => {
 app.get(A + '/experiments/:id/export.csv', async (req, res) => {
   const id = req.params.id, qs = await q(`select q.id,(case when b.title is null then q.text else b.title || ' | ' || q.text end) as text from questions q left join blocks b on b.id=q.block_id where q.experiment_id=$1 order by q.pos`, [id]);
   const rows = await q('select r.*,(select count(*) from sessions s2 where s2.experiment_id=s.experiment_id and s2.created_at<=s.created_at)::int participant,v.name as video_name,v.yt,v.part,v.ability,v.gender,v.task,v.transcript,v.transcript_no,v.model,v.question_no,v.dimension,v.attention,s.audio_ok,s.comp_attempts,s.part_order,s.comp2_attempts,s.completed,s.rejected,s.abandoned,s.consent,s.prolific_pid,s.prolific_study,s.prolific_session,s.demo,s.blocks,a.pos from responses r join videos v on v.id=r.video_id join sessions s on s.id=r.session_id join assignments a on a.session_id=r.session_id and a.video_id=r.video_id where v.experiment_id=$1 order by participant,a.pos', [id]);
-  const cols = ['participant', 'prolific_pid', 'session_id', 'pos', 'part', 'video_name', 'yt', 'ability', 'gender', 'task', 'transcript', 'transcript_no', 'model', 'question_no', 'dimension', 'attention', 'attention_passed', 'ended', 'question_order', 'audio_ok', 'comp_attempts', 'part_order', 'comp2_attempts', 'completed', 'rejected', 'abandoned', 'consent', 'prolific_study', 'prolific_session'];
-  rows.forEach(r => { r.question_order = (r.answers._order || []).join('|'); r.ba = Object.assign({}, ...Object.values(r.blocks || {}).map(b => b.answers || {})); });
+  const cols = ['participant', 'prolific_pid', 'session_id', 'pos', 'part', 'video_name', 'yt', 'ability', 'gender', 'task', 'transcript', 'transcript_no', 'model', 'question_no', 'qa_question', 'qa_answer_a', 'qa_answer_b', 'dimension', 'attention', 'attention_passed', 'ended', 'question_order', 'audio_ok', 'comp_attempts', 'part_order', 'comp2_attempts', 'completed', 'rejected', 'abandoned', 'consent', 'prolific_study', 'prolific_session'];
+  const [ex] = await q('select qa from experiments where id=$1', [id]);
+  rows.forEach(r => { const x = qaOf(ex || {}, r); r.qa_question = x?.question; r.qa_answer_a = x?.a; r.qa_answer_b = x?.b; r.question_order = (r.answers._order || []).join('|'); r.ba = Object.assign({}, ...Object.values(r.blocks || {}).map(b => b.answers || {})); });
   const esc = x => '"' + String(x ?? '').replace(/"/g, '""') + '"';
   res.type('text/csv').send('\ufeff' + [[...cols, ...qs.map(x => qs.filter(y => y.text === x.text).length > 1 ? x.text + ' (q' + x.id + ')' : x.text)].map(esc).join(','), ...rows.map(r => [...cols.map(c => r[c]), ...qs.map(x => r.answers[x.id] ?? (r.demo || {})[x.id] ?? r.ba[x.id])].map(esc).join(','))].join('\n'));
 });

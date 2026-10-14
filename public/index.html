@@ -55,6 +55,7 @@ input[type=range][data-s="0"]::-moz-range-thumb{background:var(--sheet);box-shad
 .sec+.sec{border-top:3px solid var(--acc);margin-top:2.6rem;padding-top:1.2rem}
 .sec h3{margin:.4rem 0 .3rem;font-size:1.35rem;line-height:1.3;color:var(--ink);padding:.35rem 0 .35rem .7rem;border-left:5px solid var(--acc);background:var(--sheet);position:sticky;top:calc(var(--hh,0px) + var(--nh,0px));z-index:3;box-shadow:0 6px 8px -6px rgba(20,30,45,.18)}
 /* Consigne de la vidéo répétée au-dessus des questions, qui reste visible en défilant (titres de section juste en dessous) */
+.qa{border:1.5px solid var(--line);border-radius:12px;padding:.6rem 1rem;margin:0 0 1rem}.qa p{margin:.3rem 0}
 .note.stick{position:sticky;top:var(--hh,0px);z-index:4;margin:0 0 .8rem;max-height:30vh;overflow:auto;border-radius:0 0 10px 0;box-shadow:0 -6px 0 var(--sheet)}
 #qs{margin-top:.8rem}#nx{margin-top:.6rem}
 a.btn{display:inline-block;font-weight:700;border-radius:12px;padding:.7rem 1.4rem;background:var(--acc);color:var(--acc-ink);text-decoration:none}
@@ -192,7 +193,7 @@ async function show(){
     try{localStorage.removeItem('s'+E.id);}catch(e){}return finishScreen(f.code);}
   const v=S.videos[ix],blk=arrange(S.videos[ix].part||1);ended=false;prog(step());
   if(ix>=k1()&&!S.comp2Done)return partIntro(v.part||1);
-  app.innerHTML=`<h2>Video ${ix+1} / ${S.videos.length}</h2><div id="yt"></div><p><button id="pp">⏯ Play / Pause</button></p>`+(v.instruction?`<p class="note">${esc(v.instruction)}</p>`:'')+`<p id="w"><i>Please watch the whole video to unlock the questions.</i></p><div id="qs" class="hide">${v.instruction?`<div class="note stick">${esc(v.instruction)}</div>`:''}${blk.html}<button id="nx">Next</button></div>`;
+  app.innerHTML=`<h2>Video ${ix+1} / ${S.videos.length}</h2>`+(v.qa?`<div class="qa"><p><b>Question:</b> ${esc(v.qa.question)}</p><p><b>Answer A:</b> ${esc(v.qa.a)}</p><p><b>Answer B:</b> ${esc(v.qa.b)}</p></div>`:'')+`<div id="yt"></div><p><button id="pp">⏯ Play / Pause</button></p>`+(v.instruction?`<p class="note">${esc(v.instruction)}</p>`:'')+`<p id="w"><i>Please watch the whole video to unlock the questions.</i></p><div id="qs" class="hide">${v.instruction?`<div class="note stick">${esc(v.instruction)}</div>`:''}${blk.html}<button id="nx">Next</button></div>`;
   if(!isYT(v.yt))native(v);else player=new YT.Player('yt',{videoId:v.yt,playerVars:{rel:0,playsinline:1,controls:0,disablekb:1},events:{onError:()=>{const w=$('#w');if(w)w.textContent='This video cannot be played. Please reload the page or contact the research team.';},onStateChange:e=>{if(e.data===0){ended=true;$('#qs').classList.remove('hide');$('#w').remove();}}}});
   if(isYT(v.yt)){guard();$('#pp').onclick=()=>{try{player.getPlayerState()===1?player.pauseVideo():player.playVideo();}catch(e){}};}
   $('#nx').onclick=async()=>{

@@ -47,6 +47,9 @@ async function load(){
 ${d.blocks.map(b=>blkHtml(b,d.items.filter(x=>x.block_id===b.id))).join('')}
 <p><button onclick="blkNew()">+ Ajouter un questionnaire</button></p>
 <h2>Vidéos (${d.videos.length})</h2>${d.videos.length?'<p><button onclick="delAllV()" style="color:#b00">Supprimer toutes les vidéos</button></p>':''}
+<details><summary><b>Questions des vidéos QA</b> (${Object.keys(e.qa||{}).length} question(s) importée(s))</summary>
+<small>Pour chaque vidéo dont la tâche est <code>QA</code>, la question dont l'identifiant est égal au numéro de question de la vidéo est affichée au-dessus de la vidéo, avec « Answer A » et « Answer B » : A = answer 1 et B = answer 2 si le numéro est pair, l'inverse s'il est impair. CSV avec une ligne d'en-tête : <code>id,question,answer 1,answer 2</code> (séparateur virgule, point-virgule ou tabulation). Importer remplace toutes les questions précédentes.</small>
+<p><input type="file" id="qaf" accept=".csv,.tsv,.txt" style="width:auto"></p><textarea id="qat" rows="4" placeholder="ou collez le CSV ici"></textarea><p><button onclick="importQA()">Importer les questions QA</button></p></details>
 <p><button id="ck" onclick="check()">Vérifier l'accessibilité des vidéos</button> ${ckSummary()}</p>
 <div><b>Réponses par modalité</b>${[...new Set(d.bal.map(x=>x.f))].map(f=>`<div>${f} : ${d.bal.filter(x=>x.f===f).map(x=>`${esc(x.v)||'—'} <b>${x.n}</b>`).join(' · ')}</div>`).join('')}</div>
 <table><tr><th>Vidéo</th><th>Nom</th><th>Partie</th><th>Niveau</th><th>Genre</th><th>Tâche</th><th>Transcript</th><th>Dimension</th><th>N° transcript</th><th>Modèle</th><th>N° question</th><th>Piège</th><th>Assignées</th><th>Réponses</th><th>Pièges OK</th><th>Accès</th><th></th></tr>
@@ -94,6 +97,8 @@ async function blkSave(id){await j('/api/admin/blocks/'+id,'PUT',{title:$('#bt'+
 async function blkDel(id){if(confirm('Supprimer ce questionnaire et tous ses items ?')){await j('/api/admin/blocks/'+id,'DELETE');load();}}
 async function blkMove(id,d){await j('/api/admin/blocks/'+id+'/move','POST',{dir:d});load();}
 async function blkItems(id){const r=await j(`/api/admin/blocks/${id}/items`,'POST',{kind:$('#bk'+id).value,options:$('#bo'+id).value,left_label:$('#bl'+id).value,right_label:$('#br'+id).value,section:$('#bsec'+id).value,text:$('#bx'+id).value});alert(r.added+' item(s) ajouté(s).');load();}
+async function importQA(){const f=$('#qaf').files[0],t=f?await f.text():$('#qat').value;if(!t.trim())return alert('Choisissez un fichier ou collez le CSV.');
+  const r=await j(`/api/admin/experiments/${cur}/qa`,'PUT',{text:t});alert(`${r.n} question(s) importée(s).`+(r.bad.length?`\n${r.bad.length} ligne(s) ignorée(s) (identifiant, question ou réponse manquant) :\n`+r.bad.slice(0,5).join('\n'):''));EX=await j('/api/admin/experiments');load();}
 async function delAllV(){const n=VS.length,r=VS.reduce((t,v)=>t+(v.answered||0),0);
   if(!confirm(`Supprimer les ${n} vidéo(s) de cette expérience ?`+(r?`\n\nATTENTION : ${r} réponse(s) de participants à ces vidéos seront aussi effacées.`:'')+'\nCette action est irréversible.'))return;
   if(r&&prompt('Des réponses seront perdues. Pour confirmer, tapez SUPPRIMER')!=='SUPPRIMER')return alert('Suppression annulée.');
