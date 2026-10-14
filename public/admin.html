@@ -46,7 +46,7 @@ async function load(){
 <p><small>Chaque questionnaire est une page de questions Likert ou slider, affichée à la position choisie (avant les vidéos, entre les deux parties ou après les vidéos), avant les questions démographiques. Ses réponses sont exportées dans le CSV, avec le titre du questionnaire dans l'en-tête de colonne.</small></p>
 ${d.blocks.map(b=>blkHtml(b,d.items.filter(x=>x.block_id===b.id))).join('')}
 <p><button onclick="blkNew()">+ Ajouter un questionnaire</button></p>
-<h2>Vidéos (${d.videos.length})</h2>
+<h2>Vidéos (${d.videos.length})</h2>${d.videos.length?'<p><button onclick="delAllV()" style="color:#b00">Supprimer toutes les vidéos</button></p>':''}
 <p><button id="ck" onclick="check()">Vérifier l'accessibilité des vidéos</button> ${ckSummary()}</p>
 <div><b>Réponses par modalité</b>${[...new Set(d.bal.map(x=>x.f))].map(f=>`<div>${f} : ${d.bal.filter(x=>x.f===f).map(x=>`${esc(x.v)||'—'} <b>${x.n}</b>`).join(' · ')}</div>`).join('')}</div>
 <table><tr><th>Vidéo</th><th>Nom</th><th>Partie</th><th>Niveau</th><th>Genre</th><th>Tâche</th><th>Transcript</th><th>Dimension</th><th>N° transcript</th><th>Modèle</th><th>N° question</th><th>Piège</th><th>Assignées</th><th>Réponses</th><th>Pièges OK</th><th>Accès</th><th></th></tr>
@@ -94,6 +94,10 @@ async function blkSave(id){await j('/api/admin/blocks/'+id,'PUT',{title:$('#bt'+
 async function blkDel(id){if(confirm('Supprimer ce questionnaire et tous ses items ?')){await j('/api/admin/blocks/'+id,'DELETE');load();}}
 async function blkMove(id,d){await j('/api/admin/blocks/'+id+'/move','POST',{dir:d});load();}
 async function blkItems(id){const r=await j(`/api/admin/blocks/${id}/items`,'POST',{kind:$('#bk'+id).value,options:$('#bo'+id).value,left_label:$('#bl'+id).value,right_label:$('#br'+id).value,section:$('#bsec'+id).value,text:$('#bx'+id).value});alert(r.added+' item(s) ajouté(s).');load();}
+async function delAllV(){const n=VS.length,r=VS.reduce((t,v)=>t+(v.answered||0),0);
+  if(!confirm(`Supprimer les ${n} vidéo(s) de cette expérience ?`+(r?`\n\nATTENTION : ${r} réponse(s) de participants à ces vidéos seront aussi effacées.`:'')+'\nCette action est irréversible.'))return;
+  if(r&&prompt('Des réponses seront perdues. Pour confirmer, tapez SUPPRIMER')!=='SUPPRIMER')return alert('Suppression annulée.');
+  const x=await j(`/api/admin/experiments/${cur}/videos`,'DELETE');alert(`${x.n} vidéo(s) supprimée(s).`);load();}
 async function rm(k,id){if(confirm('Supprimer ?')){await j(`/api/admin/${k}/${id}`,'DELETE');load();}}
 list();
 </script></html>

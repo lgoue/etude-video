@@ -380,6 +380,7 @@ app.post(A + '/questions/:id/move', async (req, res) => {
   res.json({ ok: true });
 });
 app.post(A + '/experiments/:id/section-shuffle', async (req, res) => { await q("update questions set shuffle=$1 where experiment_id=$2 and coalesce(section,'')=$3 and part=$4 and block_id is null and kind not like 'demo%'", [!!req.body.shuffle, req.params.id, req.body.section || '', req.body.part === 2 ? 2 : 1]); res.json({ ok: true }); });
+app.delete(A + '/experiments/:id/videos', async (req, res) => res.json({ n: (await q('delete from videos where experiment_id=$1 returning id', [req.params.id])).length }));
 app.delete(A + '/videos/:id', async (req, res) => { await q('delete from videos where id=$1', [req.params.id]); res.json({ ok: true }); });
 // Import de vidéos : avec ligne d'en-tête (colonnes nommées, dans n'importe quel ordre) ou sans (ordre fixe).
 // Séparateur : « ; » ou tabulation (copier-coller depuis un tableur).
