@@ -302,8 +302,8 @@ app.post(A + '/experiments/:id/copy', async (req, res) => {
     const bmap = {};
     for (const b of (await c.query('select * from blocks where experiment_id=$1 order by pos', [src.id])).rows) bmap[b.id] = (await c.query('insert into blocks(experiment_id,title,intro,slot,shuffle) values($1,$2,$3,$4,$5) returning id', [e.id, b.title, b.intro, b.slot, b.shuffle])).rows[0].id;
     for (const x of (await c.query('select * from questions where experiment_id=$1 order by pos', [src.id])).rows) await c.query('insert into questions(experiment_id,kind,text,left_label,right_label,scale,options,section,shuffle,part,block_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [e.id, x.kind, x.text, x.left_label, x.right_label, x.scale, x.options, x.section, x.shuffle, x.part, x.block_id ? bmap[x.block_id] : null]);
-    await c.query(`insert into videos(experiment_id,yt,ability,gender,task,transcript,dimension,attention,expected,instruction,name,part)
-      select $2,yt,ability,gender,task,transcript,dimension,attention,expected,instruction,name,part from videos where experiment_id=$1 order by id`, [src.id, e.id]);
+    await c.query(`insert into videos(experiment_id,yt,ability,gender,task,transcript,dimension,attention,expected,instruction,name,part,transcript_no,model,question_no)
+      select $2,yt,ability,gender,task,transcript,dimension,attention,expected,instruction,name,part,transcript_no,model,question_no from videos where experiment_id=$1 order by id`, [src.id, e.id]);
     await c.query('commit');
     res.json(e);
   } catch (err) { await c.query('rollback').catch(() => { }); console.error(err); res.status(500).json({ error: 'copy' }); }
