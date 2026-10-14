@@ -92,9 +92,9 @@ const FEATS = ['ability', 'gender', 'task', 'transcript'];
 // Réponse A = answer 1 et B = answer 2 si le numéro est pair, l'inverse s'il est impair.
 const isQA = v => /^qa$/i.test(String(v.task || '').trim());
 function qaOf(e, v) {
-  const x = isQA(v) && (e.qa || {})[String(v.question_no || '').trim()];
+  const n = parseInt(String(v.question_no ?? '').trim()), x = isQA(v) && !isNaN(n) && (e.qa || {})[String(n)];
   if (!x) return null;
-  const even = parseInt(v.question_no) % 2 === 0;
+  const even = n % 2 === 0;
   return { question: x.q, a: even ? x.a1 : x.a2, b: even ? x.a2 : x.a1 };
 }
 // CSV avec guillemets (séparateur virgule, point-virgule ou tabulation, déduit de la première ligne)
