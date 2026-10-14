@@ -67,35 +67,48 @@ const $=s=>document.querySelector(s),app=$('#app'),qp=new URLSearchParams(locati
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const api=async(u,b,n=0)=>{try{const r=await fetch(u,b?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}:{});return await r.json();}catch(e){if(n<4){await new Promise(r=>setTimeout(r,1000*2**n));return api(u,b,n+1);}throw e;}};
 window.addEventListener('unhandledrejection',()=>alert('Connection problem. Please check your internet connection and reload this page: the answers you have already submitted are saved, and you will be able to continue where you left off.'));
-let E,S,ix=0,attempts=1,audioOk=false,ended=false,player,consented=false,mx=0,seeks=0,timer,demoDone=false,shownPart=1,doneBlocks=new Set();
+let E,S,ix=0,attempts=1,audioOk=false,ended=false,player,consented=false,mx=0,seeks=0,timer,demoDone=false,doneBlocks=new Set();
+// Deux parties : E.first = partie montrée en premier (ordre éventuellement tiré au hasard par le serveur)
+const instrOf=p=>p===2?E.intro2:E.instructions,compOf=p=>(p===2?E.comprehension2:E.comprehension)||[];
+const k1=()=>{const i=S.videos.findIndex(v=>(v.part||1)!==(S.videos[0].part||1));return i<0?S.videos.length:i;};
+const step=()=>(E.consent?1:0)+3+ix+doneBlocks.size+(S&&S.comp2Done?1:0);
 function finishScreen(code){
   prog(1e3);
   const done=code?`<p>To confirm your participation on Prolific, click the button below or enter this completion code:</p><p><b class="code">${esc(code)}</b></p><p><a class="btn" href="https://app.prolific.com/submissions/complete?cc=${encodeURIComponent(code)}">Return to Prolific</a></p>`:'<p>You may now close this page.</p>';
   app.innerHTML='<h2>Thank you for taking part!</h2><p>Your answers have been recorded.</p>'+done;
 }
 function welcome(rs){
-  S=rs;doneBlocks=new Set(rs.blocksDone||[]);demoDone=!!rs.demoDone;shownPart=1;ix=rs.videos.findIndex(v=>!rs.answered.includes(v.id));if(ix<0)ix=rs.videos.length;
-  shownPart=ix>0&&(rs.videos[ix-1].part||1)===2?2:1;$('#title').textContent=E.name;prog((E.consent?1:0)+3+ix+doneBlocks.size);
+  S=rs;doneBlocks=new Set(rs.blocksDone||[]);demoDone=!!rs.demoDone;ix=rs.videos.findIndex(v=>!rs.answered.includes(v.id));if(ix<0)ix=rs.videos.length;
+  $('#title').textContent=E.name;prog(step());
   app.innerHTML=`<h2>Welcome back</h2><p>We found your previous session. You have already answered ${rs.answered.length} of ${rs.videos.length} videos, and you can continue where you left off.</p><p><button id="b">Continue</button></p>`;
   $('#b').onclick=()=>loadYT().then(show);
 }
-function partIntro(){
-  app.innerHTML=`<h2>Part 2</h2><div style="white-space:pre-wrap">${esc(E.intro2)}</div><p><button id="b">Continue</button></p>`;
-  $('#b').onclick=show;
+// Avant la seconde partie : ses consignes puis la vérification de leur compréhension
+function partIntro(p,msg=''){
+  const cs=compOf(p),txt=instrOf(p);prog(step());
+  if(!txt&&!cs.length){S.comp2Done=true;return show();}
+  app.innerHTML=`<h2>Part 2</h2>${msg?`<p style="color:#b00">${msg}</p>`:''}<div style="white-space:pre-wrap">${esc(txt)}</div>`+
+    (cs.length?'<h3>Instructions check</h3>':'')+cs.map((c,i)=>`<div class="q"><b>${esc(c.q)}</b>${c.options.map((o,j)=>`<label class="opt"><input type="radio" name="c${i}" value="${j}"> ${esc(o)}</label>`).join('')}</div>`).join('')+`<p><button id="b">${cs.length?'Submit':'Continue'}</button></p>`;
+  $('#b').onclick=async()=>{
+    const a=cs.map((_,i)=>{const r=document.querySelector(`input[name=c${i}]:checked`);return r?+r.value:-1;});
+    const r=await api('/api/comp2',{session:S.session,comp:a});
+    if(!r.ok){partIntro(p,'At least one answer is incorrect. Please re-read the instructions and try again.');return scrollTo(0,0);}
+    S.comp2Done=true;show();
+  };
 }
 // Questionnaires sans vidéo : avant les vidéos, entre les deux parties, ou après les vidéos
 function pendingBlock(){
-  const n=S.videos.length,k1=S.videos.filter(v=>(v.part||1)===1).length,slots=[];
+  const n=S.videos.length,k=k1(),slots=[];
   if(ix===0)slots.push('before');
-  if(ix===k1&&k1<n)slots.push('between');
-  if(ix>=n){if(k1>=n)slots.push('between');slots.push('after');}
+  if(ix===k&&k<n)slots.push('between');
+  if(ix>=n){if(k>=n)slots.push('between');slots.push('after');}
   for(const s of slots){const b=(S.blocks||[]).find(b=>b.slot===s&&!doneBlocks.has(b.id));if(b)return b;}
   return null;
 }
 function collect(qs){const a={};for(const q of qs){const el=q.kind==='likert'?document.querySelector(`input[name=q${q.id}]:checked`):document.querySelector(`input[name=q${q.id}]`);if(!el||(q.kind==='slider'&&el.dataset.s!=='1')){alert('Please answer all the questions (move every slider).');return null;}a[q.id]=+el.value;}return a;}
 function blockPage(b){
   const blk=arrange(1,b.questions,b.shuffle,b.shuffle_sections);
-  prog((E.consent?1:0)+3+ix+doneBlocks.size);
+  prog(step());
   app.innerHTML=(b.title?`<h2>${esc(b.title)}</h2>`:'')+(b.intro?`<div style="white-space:pre-wrap">${esc(b.intro)}</div>`:'')+`<div id="qs">${blk.html}<button id="nx">Next</button></div>`;
   $('#nx').onclick=async()=>{const a=collect(b.questions);if(!a)return;await api('/api/block',{session:S.session,block_id:b.id,answers:a,order:blk.order});doneBlocks.add(b.id);show();};
 }
@@ -109,14 +122,14 @@ async function init(){
   if(E.full)return app.innerHTML='<h2>This study is full</h2><p>All the places have been filled. Thank you for your interest.</p>';
   $('#title').textContent=E.name;E.consent?consent():intro();
 }
-function prog(k){const c=E.consent?1:0,d=E.has_demo?1:0,V=(S?S.videos.length:E.n_videos+E.n_attention+(E.n_videos2||0)+(E.n_attention2||0))+(S?(S.blocks||[]).length:E.n_blocks||0),tot=c+3+d+V;$('#pb').classList.remove('hide');$('#gp').max=tot;$('#gp').value=Math.min(k,tot);$('#gl').textContent=k>=tot?'Done':`Step ${k+1} / ${tot}`;}
+function prog(k){const c=E.consent?1:0,d=E.has_demo?1:0,V=(S?S.videos.length:E.n_videos+E.n_attention+(E.n_videos2||0)+(E.n_attention2||0))+(S?(S.blocks||[]).length:E.n_blocks||0),tot=c+3+d+V+(E.n_videos2>0?1:0);$('#pb').classList.remove('hide');$('#gp').max=tot;$('#gp').value=Math.min(k,tot);$('#gl').textContent=k>=tot?'Done':`Step ${k+1} / ${tot}`;}
 function consent(){prog(0);
   app.innerHTML=`<h2>Consent</h2><div style="white-space:pre-wrap">${esc(E.consent)}</div><label class="opt"><input type="checkbox" id="c"> I have read this information and agree to take part.</label><p><button id="b" disabled>Continue</button> <button id="r">I do not agree</button></p>`;
   $('#c').onchange=()=>$('#b').disabled=!$('#c').checked;
   $('#b').onclick=()=>{consented=true;intro();};
   $('#r').onclick=()=>app.innerHTML='<h2>Thank you</h2><p>You have chosen not to take part in this study. Please return the study on Prolific and close this page.</p>';
 }
-function intro(){prog(E.consent?1:0);app.innerHTML=`<div style="white-space:pre-wrap">${esc(E.instructions)}</div><p><button id="b">Continue</button></p>`;$('#b').onclick=()=>audio();}
+function intro(){prog(E.consent?1:0);app.innerHTML=`<div style="white-space:pre-wrap">${esc(instrOf(E.first)||E.instructions)}</div><p><button id="b">Continue</button></p>`;$('#b').onclick=()=>audio();}
 function beep(n){const c=new(window.AudioContext||window.webkitAudioContext)();for(let i=0;i<n;i++){const o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=660;g.gain.value=.3;o.start(c.currentTime+i*.6);o.stop(c.currentTime+i*.6+.3);}}
 function audio(msg=''){prog((E.consent?1:0)+1);
   const n=3+Math.floor(Math.random()*4);
@@ -125,17 +138,17 @@ function audio(msg=''){prog((E.consent?1:0)+1);
   $('#ok').onclick=()=>{if(+$('#n').value===n){audioOk=true;comp();}else audio("Incorrect answer. Please check your sound and try again.");};
 }
 function comp(msg=''){prog((E.consent?1:0)+2);
-  app.innerHTML=`<h2>Instructions check</h2><p style="color:#b00">${msg}</p><details ${msg?'open':''}><summary>Reminder of the instructions</summary><div style="white-space:pre-wrap">${esc(E.instructions)}</div></details>`+
-  E.comprehension.map((c,i)=>`<div class="q"><b>${esc(c.q)}</b>${c.options.map((o,j)=>`<label class="opt"><input type="radio" name="c${i}" value="${j}"> ${esc(o)}</label>`).join('')}</div>`).join('')+'<button id="b">Submit</button>';
+  app.innerHTML=`<h2>Instructions check</h2><p style="color:#b00">${msg}</p><details ${msg?'open':''}><summary>Reminder of the instructions</summary><div style="white-space:pre-wrap">${esc(instrOf(E.first)||E.instructions)}</div></details>`+
+  compOf(E.first).map((c,i)=>`<div class="q"><b>${esc(c.q)}</b>${c.options.map((o,j)=>`<label class="opt"><input type="radio" name="c${i}" value="${j}"> ${esc(o)}</label>`).join('')}</div>`).join('')+'<button id="b">Submit</button>';
   $('#b').onclick=async()=>{
-    const a=E.comprehension.map((_,i)=>{const r=document.querySelector(`input[name=c${i}]:checked`);return r?+r.value:-1;});
-    const r=await api('/api/start',{experiment_id:E.id,audio_ok:audioOk,attempts,comp:a,consent:consented,prolific:PL});
+    const a=compOf(E.first).map((_,i)=>{const r=document.querySelector(`input[name=c${i}]:checked`);return r?+r.value:-1;});
+    const r=await api('/api/start',{experiment_id:E.id,audio_ok:audioOk,attempts,comp:a,consent:consented,prolific:PL,first:E.first});
     if(r.full)return app.innerHTML='<h2>This study is full</h2><p>All the places have been filled. Thank you for your interest.</p>';if(!r.ok){attempts++;return comp('At least one answer is incorrect. Please re-read the instructions and try again.');}
-    S=r;ix=0;doneBlocks=new Set();try{localStorage.setItem('s'+E.id,S.session);}catch(e){}loadYT().then(show);
+    S=r;S.comp2Done=false;ix=0;doneBlocks=new Set();try{localStorage.setItem('s'+E.id,S.session);}catch(e){}loadYT().then(show);
   };
 }
 function demo(){
-  if(!S.demo.length){demoDone=true;return show();}prog((E.consent?1:0)+3+S.videos.length+(S.blocks||[]).length);
+  if(!S.demo.length){demoDone=true;return show();}prog((E.consent?1:0)+3+S.videos.length+(S.blocks||[]).length+(S.comp2Done?1:0));
   app.innerHTML='<h2>A few last questions about you</h2>'+S.demo.map(q=>`<div class="q"><b>${esc(q.text)}</b><br>`+(q.kind==='demo_radio'?`<div>${(q.options||'').split(';').map(o=>o.trim()).filter(Boolean).map(o=>`<label class="opt"><input type="radio" name="q${q.id}" value="${esc(o)}"> ${esc(o)}</label>`).join('')}</div>`:q.kind==='demo_choice'?`<select name="q${q.id}"><option value="">—</option>${(q.options||'').split(';').map(o=>`<option>${esc(o.trim())}</option>`).join('')}</select>`:`<input name="q${q.id}" style="width:100%">`)+'</div>').join('')+'<button id="b">Continue</button>';
   $('#b').onclick=async()=>{const a={};for(const q of S.demo){const el=q.kind==='demo_radio'?document.querySelector(`input[name=q${q.id}]:checked`):document.querySelector(`[name=q${q.id}]`),v=el?el.value.trim():'';if(!v)return alert('Please answer all the questions.');a[q.id]=v;}await api('/api/demo',{session:S.session,answers:a});demoDone=true;show();};
 }
@@ -169,8 +182,8 @@ async function show(){
   if(ix>=S.videos.length){const f=await api('/api/finish',{session:S.session});
     if(!f.ok)return app.innerHTML='<h2>Something went wrong</h2><p>Your answers could not be validated. Please reload the page or contact the research team.</p>';
     try{localStorage.removeItem('s'+E.id);}catch(e){}return finishScreen(f.code);}
-  const v=S.videos[ix],blk=arrange(S.videos[ix].part||1);ended=false;prog((E.consent?1:0)+3+ix+doneBlocks.size);
-  if((v.part||1)===2&&shownPart!==2&&E.intro2){shownPart=2;return partIntro();}
+  const v=S.videos[ix],blk=arrange(S.videos[ix].part||1);ended=false;prog(step());
+  if(ix>=k1()&&!S.comp2Done)return partIntro(v.part||1);
   app.innerHTML=`<h2>Video ${ix+1} / ${S.videos.length}</h2><div id="yt"></div><p><button id="pp">⏯ Play / Pause</button></p>`+(v.instruction?`<p class="note">${esc(v.instruction)}</p>`:'')+`<p id="w"><i>Please watch the whole video to unlock the questions.</i></p><div id="qs" class="hide">${blk.html}<button id="nx">Next</button></div>`;
   if(!isYT(v.yt))native(v);else player=new YT.Player('yt',{videoId:v.yt,playerVars:{rel:0,playsinline:1,controls:0,disablekb:1},events:{onError:()=>{const w=$('#w');if(w)w.textContent='This video cannot be played. Please reload the page or contact the research team.';},onStateChange:e=>{if(e.data===0){ended=true;$('#qs').classList.remove('hide');$('#w').remove();}}}});
   if(isYT(v.yt)){guard();$('#pp').onclick=()=>{try{player.getPlayerState()===1?player.pauseVideo():player.playVideo();}catch(e){}};}
