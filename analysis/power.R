@@ -11,8 +11,8 @@ set.seed(2026)
 
 # ---- Paramètres du plan ----
 VIDEOS_PAR_PART <- 12           # n_videos de l'expérience (hors pièges)
-VIDEOS_PAR_CELLULE <- 8         # vidéos disponibles par combinaison niveau × modèle (6 cellules → 48 vidéos)
-N_GRID <- c(40, 80, 120, 160, 200, 260)
+VIDEOS_PAR_CELLULE <- as.integer(Sys.getenv("VPC", "8"))  # vidéos disponibles par combinaison niveau × modèle (8 → 48 vidéos)
+N_GRID <- as.integer(strsplit(Sys.getenv("N_GRID", "40,80,120,160,200,260"), ",")[[1]])
 N_SIM <- as.integer(Sys.getenv("N_SIM", "300"))
 ALPHA <- .05
 
@@ -24,6 +24,7 @@ SD_RES <- sqrt(.60)             # bruit résiduel
 # ---- Tailles d'effet testées (d de Cohen sur l'écart-type total) ----
 # niveau : High − Low ; modèle : A − B ; interaction : (High − Low chez A) − (High − Low chez B)
 SCENARIOS <- c(nul = 0, petit = .2, moyen = .35, `moyen+` = .5)
+if (nzchar(Sys.getenv("SCEN"))) SCENARIOS <- SCENARIOS[strsplit(Sys.getenv("SCEN"), ",")[[1]]]
 
 sim_one <- function(n, d) {
   cells <- expand.grid(niveau = c(-1, 0, 1), modele = c(-.5, .5))
@@ -49,8 +50,8 @@ sim_one <- function(n, d) {
 res <- do.call(rbind, lapply(names(SCENARIOS), function(s) do.call(rbind, lapply(N_GRID, function(n) {
   ps <- do.call(rbind, mclapply(seq_len(N_SIM), function(i) tryCatch(sim_one(n, SCENARIOS[[s]]), error = function(e) rep(NA, 6)), mc.cores = max(1, detectCores())))
   pw <- colMeans(ps < ALPHA, na.rm = TRUE)
-  r <- data.frame(scenario = s, d = SCENARIOS[[s]], N = n,
+  r <- data.frame(scenario = s, d = SCENARIOS[[s]], videos_par_cellule = VIDEOS_PAR_CELLULE, N = n,
     lmm_niveau = pw[1], lmm_modele = pw[2], lmm_inter = pw[3], anova_niveau = pw[4], anova_modele = pw[5], anova_inter = pw[6])
   print(r, row.names = FALSE, digits = 2); flush.console(); r
 }))))
-write.csv(res, file.path(dirname(sub("--file=", "", grep("--file=", commandArgs(FALSE), value = TRUE))), "power_results.csv"), row.names = FALSE)
+write.csv(res, file.path(dirname(sub("--file=", "", grep("--file=", commandArgs(FALSE), value = TRUE))), paste0("power_results_v", VIDEOS_PAR_CELLULE, ".csv")), row.names = FALSE)
