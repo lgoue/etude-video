@@ -81,6 +81,8 @@ async function loadBlocks(eid) {
 }
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const FEATS = ['ability', 'gender', 'task', 'transcript'];
+// Valeur d'une vidéo pour un aspect équilibré ; « model+ability » = combinaison croisée (chaque couple modèle × niveau)
+const fval = (v, f) => f.split('+').map(k => v[k] || '').join(' × ');
 
 // Sélection équilibrée : priorité à l'équilibre intra-participant, puis aux vidéos les moins vues globalement
 async function pick(e, part = 1) {
@@ -91,10 +93,10 @@ async function pick(e, part = 1) {
   while (out.length < NV && pool_.length) {
     let best = null, bs = Infinity;
     for (const v of pool_) {
-      const s = 1000 * F.reduce((t, f) => t + (c[f + ':' + v[f]] || 0), 0) + v.n + Math.random();
+      const s = 1000 * F.reduce((t, f) => t + (c[f + ':' + fval(v, f)] || 0), 0) + v.n + Math.random();
       if (s < bs) { bs = s; best = v; }
     }
-    F.forEach(f => c[f + ':' + best[f]] = (c[f + ':' + best[f]] || 0) + 1);
+    F.forEach(f => { const k = f + ':' + fval(best, f); c[k] = (c[k] || 0) + 1; });
     out.push(best); pool_ = pool_.filter(v => v !== best);
   }
   shuffle(out); att.forEach(a => out.splice(1 + Math.floor(Math.random() * out.length), 0, a));
@@ -241,7 +243,7 @@ app.post(A + '/experiments/:id/verify', async (req, res) => {
     if (e.n_videos2 && !qs.some(x => x.part === part && (x.kind === 'likert' || x.kind === 'slider'))) add('error', `${tag}aucune question Likert ou slider pour cette partie`);
     if (vs.some(v => v.part === part && v.attention) && !qs.some(x => x.part === part && x.kind === 'likert')) add('error', `${tag}des vidéos pièges existent mais aucune question Likert dans cette partie`);
   }
-  for (const f of (e.balance || '').split(',').filter(Boolean)) { const n = vs.filter(v => !v.attention && !v[f]).length; if (n) add('warn', `${n} vidéo(s) sans valeur pour l'aspect équilibré « ${f} »`); }
+  for (const f of (e.balance || '').split(',').filter(Boolean)) { const n = vs.filter(v => !v.attention && f.split('+').some(k => !v[k])).length; if (n) add('warn', `${n} vidéo(s) sans valeur pour l'aspect équilibré « ${f} »`); }
   const lik = qs.filter(x => x.kind === 'likert'), first = lik.length ? { scale: Math.min(...lik.map(x => x.scale)) } : null;
   if (!qs.some(x => x.kind === 'likert' || x.kind === 'slider')) add('error', 'Aucune question Likert ou slider après les vidéos');
   else add('ok', `${qs.length} question(s) configurée(s)`);
@@ -325,7 +327,7 @@ app.get(A + '/experiments/:id', async (req, res) => {
     items: await q('select * from questions where experiment_id=$1 and block_id is not null order by pos', [id]),
     videos: await q(`select v.*,(select count(*) from assignments a where a.video_id=v.id)::int assigned,(select count(*) from responses r where r.video_id=v.id and r.session_id not in (select id from sessions where rejected or abandoned))::int answered,(select count(*) from responses r where r.video_id=v.id and r.attention_passed and r.session_id not in (select id from sessions where rejected or abandoned))::int att_ok from videos v where experiment_id=$1 order by id`, [id]),
     sessions: (await q('select count(*)::int total,count(*) filter(where completed)::int done,count(*) filter(where exists(select 1 from responses r where r.session_id=sessions.id and r.attention_passed is false))::int attfail,count(*) filter(where rejected)::int rej,count(*) filter(where completed and not rejected and not abandoned)::int valid,count(*) filter(where not completed and not rejected and not abandoned and last_seen>now()-make_interval(hours=>2))::int active from sessions where experiment_id=$1', [id]))[0],
-    bal: await q('select f,v,sum(n)::int n from (' + ['ability', 'dimension', 'gender', 'task', 'transcript'].map(f => `select '${f}' f,coalesce(v.${f},'') v,count(r.id) n from videos v left join responses r on r.video_id=v.id and r.session_id not in (select id from sessions where rejected or abandoned) where v.experiment_id=$1 and not v.attention group by v.${f}`).join(' union all ') + ') t group by f,v order by f,v', [id])
+    bal: await q('select f,v,sum(n)::int n from (' + [['ability', 'v.ability'], ['dimension', 'v.dimension'], ['gender', 'v.gender'], ['task', 'v.task'], ['transcript', 'v.transcript'], ['model', 'v.model'], ['model × niveau', "coalesce(v.model,'') || ' × ' || coalesce(v.ability,'')"]].map(([f, x]) => `select '${f}' f,coalesce(${x},'') v,count(r.id) n from videos v left join responses r on r.video_id=v.id and r.session_id not in (select id from sessions where rejected or abandoned) where v.experiment_id=$1 and not v.attention group by ${x}`).join(' union all ') + ') t group by f,v order by f,v', [id])
   });
 });
 app.post(A + '/experiments/:id/questions', async (req, res) => {
