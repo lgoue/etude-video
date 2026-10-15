@@ -128,8 +128,10 @@ function pendingBlock(){
   for(const s of slots){const b=(S.blocks||[]).find(b=>b.slot===s&&!doneBlocks.has(b.id));if(b)return b;}
   return null;
 }
-// Questions à texte libre : facultatives, réponse enregistrée telle quelle (chaîne)
-function collect(qs){const a={};for(const q of qs){if(q.kind==='text'){const t=document.querySelector(`textarea[name=q${q.id}]`);a[q.id]=t?t.value.trim():'';continue;}const el=q.kind==='likert'?document.querySelector(`input[name=q${q.id}]:checked`):document.querySelector(`input[name=q${q.id}]`);if(!el||(q.kind==='slider'&&el.dataset.s!=='1')){alert('Please answer all the questions (move every slider).');return null;}a[q.id]=+el.value;}return a;}
+// Question facultative : choix explicite dans l'admin, sinon texte libre facultatif et autres questions obligatoires.
+// Une question facultative sans réponse n'est pas enregistrée (case vide à l'export).
+const isOpt=q=>q.optional===true||(q.optional==null&&q.kind==='text');
+function collect(qs){const a={};for(const q of qs){if(q.kind==='text'){const t=document.querySelector(`textarea[name=q${q.id}]`),v=t?t.value.trim():'';if(!v&&!isOpt(q)){alert('Please answer all the required questions.');return null;}if(v)a[q.id]=v;continue;}const el=q.kind==='likert'?document.querySelector(`input[name=q${q.id}]:checked`):document.querySelector(`input[name=q${q.id}]`);if(!el||(q.kind==='slider'&&el.dataset.s!=='1')){if(isOpt(q))continue;alert('Please answer all the required questions (move every required slider).');return null;}a[q.id]=+el.value;}return a;}
 function blockPage(b){
   const blk=arrange(1,b.questions,b.shuffle,b.shuffle_sections);
   prog(step());
@@ -175,8 +177,8 @@ function comp(msg='',prev=[]){prog((E.consent?1:0)+2);
 }
 function demo(){
   if(!S.demo.length){demoDone=true;return show();}prog((E.consent?1:0)+3+S.videos.length+(S.blocks||[]).length+(S.comp2Done?1:0));
-  app.innerHTML='<h2>A few last questions about you</h2>'+S.demo.map(q=>`<div class="q"><b>${esc(q.text)}</b><br>`+(q.kind==='demo_radio'?`<div>${(q.options||'').split(';').map(o=>o.trim()).filter(Boolean).map(o=>`<label class="opt"><input type="radio" name="q${q.id}" value="${esc(o)}"> ${esc(o)}</label>`).join('')}</div>`:q.kind==='demo_choice'?`<select name="q${q.id}"><option value="">—</option>${(q.options||'').split(';').map(o=>`<option>${esc(o.trim())}</option>`).join('')}</select>`:`<input name="q${q.id}" style="width:100%">`)+'</div>').join('')+'<button id="b">Continue</button>';
-  $('#b').onclick=async()=>{const a={};for(const q of S.demo){const el=q.kind==='demo_radio'?document.querySelector(`input[name=q${q.id}]:checked`):document.querySelector(`[name=q${q.id}]`),v=el?el.value.trim():'';if(!v)return alert('Please answer all the questions.');a[q.id]=v;}await api('/api/demo',{session:S.session,answers:a});demoDone=true;show();};
+  app.innerHTML='<h2>A few last questions about you</h2>'+S.demo.map(q=>`<div class="q"><b>${esc(q.text)}</b>${optL(q)}<br>`+(q.kind==='demo_radio'?`<div>${(q.options||'').split(';').map(o=>o.trim()).filter(Boolean).map(o=>`<label class="opt"><input type="radio" name="q${q.id}" value="${esc(o)}"> ${esc(o)}</label>`).join('')}</div>`:q.kind==='demo_choice'?`<select name="q${q.id}"><option value="">—</option>${(q.options||'').split(';').map(o=>`<option>${esc(o.trim())}</option>`).join('')}</select>`:`<input name="q${q.id}" style="width:100%">`)+'</div>').join('')+'<button id="b">Continue</button>';
+  $('#b').onclick=async()=>{const a={};for(const q of S.demo){const el=q.kind==='demo_radio'?document.querySelector(`input[name=q${q.id}]:checked`):document.querySelector(`[name=q${q.id}]`),v=el?el.value.trim():'';if(!v){if(isOpt(q))continue;return alert('Please answer all the required questions.');}a[q.id]=v;}a._done=1;await api('/api/demo',{session:S.session,answers:a});demoDone=true;show();};
 }
 // Anti-avance rapide : contrôles masqués, clavier désactivé, retour forcé si saut en avant
 function guard(){clearInterval(timer);mx=0;seeks=0;timer=setInterval(()=>{try{const s=player.getPlayerState();if(s!==1&&s!==2&&s!==3)return;const t=player.getCurrentTime();if(t>mx+1.5){seeks++;player.seekTo(mx,true);}else if(t>mx)mx=t;if(player.getPlaybackRate()!==1)player.setPlaybackRate(1);}catch(e){}},500);}
@@ -192,7 +194,8 @@ function native(v){
   $('#pp').onclick=()=>el.paused?el.play():el.pause();
 }
 function loadYT(){return new Promise(r=>{if(window.YT&&YT.Player)return r();window.onYouTubeIframeAPIReady=r;const s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';document.head.appendChild(s);});}
-const qh=q=>q.kind==='text'?`<div class="q"><b>${esc(q.text)}</b> <small class="opt-l">(optional)</small><textarea name="q${q.id}" rows="3" maxlength="2000"></textarea></div>`:`<div class="q"><b>${esc(q.text)}</b>`+(q.kind==='likert'?`<div class="lk${(q.options||'').includes(';')?' txt':''}">${Array.from({length:q.scale},(_,i)=>`<label><input type="radio" name="q${q.id}" value="${i+1}"><span>${(q.options||'').split(';')[i]?.trim()||i+1}</span></label>`).join('')}</div>`:`<input type="range" min="0" max="100" value="50" name="q${q.id}" data-s="0" oninput="this.dataset.s=1">`)+`<div class="ends"><span>${esc(q.left_label)}</span><span>${esc(q.right_label)}</span></div></div>`;
+const optL=q=>isOpt(q)?' <small class="opt-l">(optional)</small>':'';
+const qh=q=>q.kind==='text'?`<div class="q"><b>${esc(q.text)}</b>${optL(q)}<textarea name="q${q.id}" rows="3" maxlength="2000"></textarea></div>`:`<div class="q"><b>${esc(q.text)}</b>${optL(q)}`+(q.kind==='likert'?`<div class="lk${(q.options||'').includes(';')?' txt':''}">${Array.from({length:q.scale},(_,i)=>`<label><input type="radio" name="q${q.id}" value="${i+1}"><span>${(q.options||'').split(';')[i]?.trim()||i+1}</span></label>`).join('')}</div>`:`<input type="range" min="0" max="100" value="50" name="q${q.id}" data-s="0" oninput="this.dataset.s=1">`)+`<div class="ends"><span>${esc(q.left_label)}</span><span>${esc(q.right_label)}</span></div></div>`;
 // Sections séparées par une ligne ; les questions cochées « aléatoire » sont mélangées entre elles à l'intérieur de leur section, à chaque vidéo
 // shufSec : l'ordre des sections elles-mêmes est tiré au hasard (questionnaires sans vidéo)
 function arrange(part,list,all,shufSec){

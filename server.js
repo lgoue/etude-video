@@ -62,7 +62,8 @@ alter table sessions add column if not exists part_order text;
 alter table sessions add column if not exists comp2_attempts int default 0;
 alter table sessions add column if not exists comp2_ok bool default false;
 alter table experiments add column if not exists qa jsonb default '{}';
-alter table experiments add column if not exists end_message text default '';`;
+alter table experiments add column if not exists end_message text default '';
+alter table questions add column if not exists optional bool;`;
 
 const DEF_INSTR = "You will watch several short videos of a conversational agent. Please watch each video in full with the sound on, then answer the questions that follow.\nThere are no right or wrong answers: we are interested in your personal impression.";
 const DEF_COMP = [{ q: "What should you do after each video?", options: ["Answer the questions", "Skip straight to the next video", "Close the page"], correct: 0 }];
@@ -84,7 +85,7 @@ const qScale = b => { const n = String(b.options || '').split(';').map(x => x.tr
 // Questionnaires sans vidéo (échelles standardisées) : une page de questions à une position choisie
 async function loadBlocks(eid) {
   const bs = await q('select id,title,intro,slot,shuffle,shuffle_sections from blocks where experiment_id=$1 order by pos', [eid]);
-  const xs = await q('select id,kind,text,left_label,right_label,scale,options,section,shuffle,block_id from questions where experiment_id=$1 and block_id is not null order by pos', [eid]);
+  const xs = await q('select id,kind,text,left_label,right_label,scale,options,section,shuffle,block_id,optional from questions where experiment_id=$1 and block_id is not null order by pos', [eid]);
   return bs.map(b => ({ ...b, questions: xs.filter(x => x.block_id === b.id) })).filter(b => b.questions.length);
 }
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -185,7 +186,7 @@ app.post('/api/start', async (req, res) => {
   const order = vids.some(v => v.part === 2) && vids.some(v => v.part === 1) ? (first === 2 ? '21' : '12') : null;
   await q('insert into sessions(id,experiment_id,audio_ok,comp_attempts,consent,prolific_pid,prolific_study,prolific_session,part_order) values($1,$2,$3,$4,$5,$6,$7,$8,$9)', [id, e.id, !!audio_ok, attempts || 1, !!consent, ...['pid', 'study', 'session'].map(k => String(pl[k] || '').slice(0, 100) || null), order]);
   for (let i = 0; i < vids.length; i++) await q('insert into assignments values($1,$2,$3)', [id, vids[i].id, i]);
-  const qs = await q('select id,kind,text,left_label,right_label,scale,options,section,shuffle,part from questions where experiment_id=$1 and block_id is null order by pos', [e.id]);
+  const qs = await q('select id,kind,text,left_label,right_label,scale,options,section,shuffle,part,optional from questions where experiment_id=$1 and block_id is null order by pos', [e.id]);
   res.json({ ok: true, session: id, blocks: await loadBlocks(e.id), questions: qs.filter(x => !x.kind.startsWith('demo')), demo: qs.filter(x => x.kind.startsWith('demo')), videos: vids.map(v => ({ id: v.id, yt: v.yt, instruction: v.instruction, part: v.part, qa: qaOf(e, v) })) });
 });
 app.post('/api/answer', async (req, res) => {
@@ -223,7 +224,7 @@ app.post('/api/resume', async (req, res) => {
   await q('update sessions set last_seen=now() where id=$1', [s.id]);
   const videos = (await q('select v.id,v.yt,v.instruction,v.part,v.task,v.question_no from videos v join assignments a on a.video_id=v.id where a.session_id=$1 order by a.pos', [s.id])).map(v => ({ id: v.id, yt: v.yt, instruction: v.instruction, part: v.part, qa: qaOf(e, v) }));
   const answered = (await q('select video_id from responses where session_id=$1', [s.id])).map(r => r.video_id);
-  const qs = await q('select id,kind,text,left_label,right_label,scale,options,section,shuffle,part from questions where experiment_id=$1 and block_id is null order by pos', [e.id]);
+  const qs = await q('select id,kind,text,left_label,right_label,scale,options,section,shuffle,part,optional from questions where experiment_id=$1 and block_id is null order by pos', [e.id]);
   res.json({ resume: true, session: s.id, blocks: await loadBlocks(e.id), blocksDone: Object.keys(s.blocks || {}).map(Number), questions: qs.filter(x => !x.kind.startsWith('demo')), demo: qs.filter(x => x.kind.startsWith('demo')), demoDone: Object.keys(s.demo || {}).length > 0, comp2Done: !!s.comp2_ok, videos, answered });
 });
 app.post('/api/finish', async (req, res) => {
@@ -364,7 +365,7 @@ app.post(A + '/blocks/:id/move', async (req, res) => {
 app.post(A + '/blocks/:id/items', async (req, res) => {
   const [b] = await q('select id,experiment_id from blocks where id=$1', [req.params.id]); if (!b) return res.status(404).json({});
   const x = req.body, kind = ['slider', 'text'].includes(x.kind) ? x.kind : 'likert', lines = String(x.text || '').split('\n').map(l => l.trim()).filter(Boolean);
-  for (const t of lines) await q('insert into questions(experiment_id,kind,text,left_label,right_label,scale,options,section,shuffle,part,block_id) values($1,$2,$3,$4,$5,$6,$7,$8,false,1,$9)', [b.experiment_id, kind, t, x.left_label || '', x.right_label || '', qScale({ kind, options: x.options, scale: x.scale }), x.options || '', (x.section || '').trim(), b.id]);
+  for (const t of lines) await q('insert into questions(experiment_id,kind,text,left_label,right_label,scale,options,section,shuffle,part,block_id,optional) values($1,$2,$3,$4,$5,$6,$7,$8,false,1,$9,$10)', [b.experiment_id, kind, t, x.left_label || '', x.right_label || '', qScale({ kind, options: x.options, scale: x.scale }), x.options || '', (x.section || '').trim(), b.id, typeof x.optional === 'boolean' ? x.optional : null]);
   res.json({ added: lines.length });
 });
 // Copie d'une expérience : réglages, questions et vidéos (pas les participants ni les réponses). La copie est inactive et sans code Prolific.
@@ -379,7 +380,7 @@ app.post(A + '/experiments/:id/copy', async (req, res) => {
       select $2::text,$3::text,false,n_videos,n_attention,instructions,comprehension,consent,balance,'',n_target,n_videos2,n_attention2,intro2,comprehension2,random_parts,qa,end_message from experiments where id=$1 returning *`, [src.id, name, slug]);
     const bmap = {};
     for (const b of (await c.query('select * from blocks where experiment_id=$1 order by pos', [src.id])).rows) bmap[b.id] = (await c.query('insert into blocks(experiment_id,title,intro,slot,shuffle,shuffle_sections) values($1,$2,$3,$4,$5,$6) returning id', [e.id, b.title, b.intro, b.slot, b.shuffle, b.shuffle_sections])).rows[0].id;
-    for (const x of (await c.query('select * from questions where experiment_id=$1 order by pos', [src.id])).rows) await c.query('insert into questions(experiment_id,kind,text,left_label,right_label,scale,options,section,shuffle,part,block_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [e.id, x.kind, x.text, x.left_label, x.right_label, x.scale, x.options, x.section, x.shuffle, x.part, x.block_id ? bmap[x.block_id] : null]);
+    for (const x of (await c.query('select * from questions where experiment_id=$1 order by pos', [src.id])).rows) await c.query('insert into questions(experiment_id,kind,text,left_label,right_label,scale,options,section,shuffle,part,block_id,optional) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)', [e.id, x.kind, x.text, x.left_label, x.right_label, x.scale, x.options, x.section, x.shuffle, x.part, x.block_id ? bmap[x.block_id] : null, x.optional]);
     await c.query(`insert into videos(experiment_id,yt,ability,gender,task,transcript,dimension,attention,expected,instruction,name,part,transcript_no,model,question_no)
       select $2,yt,ability,gender,task,transcript,dimension,attention,expected,instruction,name,part,transcript_no,model,question_no from videos where experiment_id=$1 order by id`, [src.id, e.id]);
     await c.query('commit');
@@ -409,11 +410,11 @@ app.get(A + '/experiments/:id', async (req, res) => {
   });
 });
 app.post(A + '/experiments/:id/questions', async (req, res) => {
-  const b = req.body; await q('insert into questions(experiment_id,kind,text,left_label,right_label,scale,options,section,shuffle,part) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [req.params.id, b.kind, b.text, b.left_label || '', b.right_label || '', qScale(b), b.options || '', (b.section || '').trim(), !!b.shuffle, b.part === 2 ? 2 : 1]); res.json({ ok: true });
+  const b = req.body; await q('insert into questions(experiment_id,kind,text,left_label,right_label,scale,options,section,shuffle,part,optional) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [req.params.id, b.kind, b.text, b.left_label || '', b.right_label || '', qScale(b), b.options || '', (b.section || '').trim(), !!b.shuffle, b.part === 2 ? 2 : 1, typeof b.optional === 'boolean' ? b.optional : null]); res.json({ ok: true });
 });
 app.delete(A + '/questions/:id', async (req, res) => { await q('delete from questions where id=$1', [req.params.id]); res.json({ ok: true }); });
 app.put(A + '/questions/:id', async (req, res) => {
-  const b = req.body; await q('update questions set kind=$1,text=$2,left_label=$3,right_label=$4,scale=$5,options=$6,section=$7,shuffle=$8,part=$9 where id=$10', [b.kind, b.text, b.left_label || '', b.right_label || '', qScale(b), b.options || '', (b.section || '').trim(), !!b.shuffle, b.part === 2 ? 2 : 1, req.params.id]); res.json({ ok: true });
+  const b = req.body; await q('update questions set kind=$1,text=$2,left_label=$3,right_label=$4,scale=$5,options=$6,section=$7,shuffle=$8,part=$9,optional=$11 where id=$10', [b.kind, b.text, b.left_label || '', b.right_label || '', qScale(b), b.options || '', (b.section || '').trim(), !!b.shuffle, b.part === 2 ? 2 : 1, req.params.id, typeof b.optional === 'boolean' ? b.optional : null]); res.json({ ok: true });
 });
 app.post(A + '/questions/:id/move', async (req, res) => {
   const [m] = await q('select id,experiment_id,pos,kind,part,block_id from questions where id=$1', [req.params.id]); if (!m) return res.json({});
