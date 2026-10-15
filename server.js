@@ -129,19 +129,25 @@ const compOk = (list, a) => list.every((c, i) => (a || [])[i] === c.correct);
 const fval = (v, f) => f.split('+').map(k => v[k] || '').join(' × ');
 
 // Sélection équilibrée : priorité à l'équilibre intra-participant, puis aux vidéos les moins vues globalement
-async function pick(e, part = 1) {
+// usedQ : numéros de question QA déjà attribués à ce participant (partagé entre les deux parties) ; une même
+// question QA n'est donnée deux fois que s'il n'existe plus aucune autre vidéo possible
+const qaKey = v => { const n = parseInt(String(v.question_no ?? '').trim()); return isQA(v) && !isNaN(n) ? n : null; };
+async function pick(e, part = 1, usedQ = new Set()) {
   const NV = part === 2 ? e.n_videos2 : e.n_videos, NA = part === 2 ? e.n_attention2 : e.n_attention;
   const vs = await q(`select v.*,(select count(*) from assignments a join sessions s on s.id=a.session_id where a.video_id=v.id and not (s.rejected or s.abandoned) and (s.completed or s.last_seen>now()-interval '2 hours'))::int n from videos v where experiment_id=$1 and part=$2`, [e.id, part]);
   const F = (e.balance || '').split(',').filter(Boolean);
-  let pool_ = vs.filter(v => !v.attention); const att = shuffle(vs.filter(v => v.attention)).slice(0, NA), out = [], c = {};
+  const dup = v => qaKey(v) !== null && usedQ.has(qaKey(v)), use = v => { if (qaKey(v) !== null) usedQ.add(qaKey(v)); };
+  let pool_ = vs.filter(v => !v.attention), out = [], c = {};
+  const att = [], cand = shuffle(vs.filter(v => v.attention));
+  while (att.length < NA && cand.length) { const i = Math.max(0, cand.findIndex(v => !dup(v))); att.push(cand[i]); use(cand[i]); cand.splice(i, 1); }
   while (out.length < NV && pool_.length) {
     let best = null, bs = Infinity;
     for (const v of pool_) {
-      const s = 1000 * F.reduce((t, f) => t + (c[f + ':' + fval(v, f)] || 0), 0) + v.n + Math.random();
+      const s = (dup(v) ? 1e9 : 0) + 1000 * F.reduce((t, f) => t + (c[f + ':' + fval(v, f)] || 0), 0) + v.n + Math.random();
       if (s < bs) { bs = s; best = v; }
     }
     F.forEach(f => { const k = f + ':' + fval(best, f); c[k] = (c[k] || 0) + 1; });
-    out.push(best); pool_ = pool_.filter(v => v !== best);
+    out.push(best); use(best); pool_ = pool_.filter(v => v !== best);
   }
   shuffle(out); att.forEach(a => out.splice(1 + Math.floor(Math.random() * out.length), 0, a));
   return out;
@@ -174,7 +180,7 @@ app.post('/api/start', async (req, res) => {
     const [c] = await q('select count(*)::int n from sessions where experiment_id=$1 and not completed and not rejected and not abandoned and last_seen>now()-make_interval(hours=>2)', [e.id]);
     if (done + c.n >= e.n_target) take = (await q('update sessions set abandoned=true where id=(select id from sessions where experiment_id=$1 and not completed and not rejected and not abandoned and last_seen>now()-make_interval(hours=>2) order by last_seen limit 1 for update skip locked) returning id', [e.id]))[0]?.id;
   }
-  let vids = take ? await q('select v.* from videos v join assignments a on a.video_id=v.id where a.session_id=$1 order by a.pos', [take]) : [...await pick(e, 1), ...await pick(e, 2)];
+  let vids = take ? await q('select v.* from videos v join assignments a on a.video_id=v.id where a.session_id=$1 order by a.pos', [take]) : await (async () => { const usedQ = new Set(); return [...await pick(e, 1, usedQ), ...await pick(e, 2, usedQ)]; })();
   vids = [...vids.filter(v => v.part === first), ...vids.filter(v => v.part !== first)];
   const order = vids.some(v => v.part === 2) && vids.some(v => v.part === 1) ? (first === 2 ? '21' : '12') : null;
   await q('insert into sessions(id,experiment_id,audio_ok,comp_attempts,consent,prolific_pid,prolific_study,prolific_session,part_order) values($1,$2,$3,$4,$5,$6,$7,$8,$9)', [id, e.id, !!audio_ok, attempts || 1, !!consent, ...['pid', 'study', 'session'].map(k => String(pl[k] || '').slice(0, 100) || null), order]);
