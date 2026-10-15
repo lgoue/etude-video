@@ -65,4 +65,4 @@ res <- do.call(rbind, lapply(names(SCENARIOS), function(s) do.call(rbind, lapply
   r <- data.frame(scenario = s, d = SCENARIOS[[s]], videos_par_part = VIDEOS_PAR_PART, N = n, t(pw), n_ok = sum(complete.cases(ps)))
   print(r, row.names = FALSE, digits = 2); flush.console(); r
 }))))
-write.csv(res, file.path("analysis", paste0("power_plan_results_vpp", VIDEOS_PAR_PART, ".csv")), row.names = FALSE)
+write.csv(res, file.path("analysis", Sys.getenv("OUT", paste0("power_plan_results_vpp", VIDEOS_PAR_PART, ".csv"))), row.names = FALSE)
