@@ -22,8 +22,10 @@ if (nzchar(Sys.getenv("SCEN"))) SCENARIOS <- SCENARIOS[strsplit(Sys.getenv("SCEN
 
 vids0 <- expand.grid(agent = c("F", "M"), transcript = c("F", "M", "N"), niveau = c("Low", "Medium", "High"),
                      modele = c("gpt", "gemma", "mistral"), tache = c("nav", "qa"), rep = seq_len(VIDEOS_PAR_COMBI), stringsAsFactors = FALSE)
-vids0$video <- seq_len(nrow(vids0)); vids0$modele_niveau <- paste(vids0$modele, vids0$niveau)
-FEATS <- c("niveau", "modele", "modele_niveau", "agent", "transcript", "tache")
+vids0$video <- seq_len(nrow(vids0)); vids0$modele_niveau <- paste(vids0$modele, vids0$niveau); vids0$agent_transcript <- paste(vids0$agent, vids0$transcript)
+# BAL_GT=1 : équilibre aussi la combinaison genre agent × genre transcript (case « Combinaison genre agent × genre transcript »)
+BAL_GT <- Sys.getenv("BAL_GT") == "1"
+FEATS <- c("niveau", "modele", "modele_niveau", "agent", "transcript", "tache", if (BAL_GT) "agent_transcript")
 
 # Attribution identique à pick() de server.js
 assign_videos <- function(n) {
@@ -44,24 +46,27 @@ sim_one <- function(n, d) {
   v <- vids0; v$w <- rnorm(nrow(v), 0, SD_VIDEO)
   niv <- c(Low = -1, Medium = 0, High = 1)[v$niveau]; mod <- c(mistral = -.5, gemma = 0, gpt = .5)[v$modele]
   v$mu <- (d / 2) * niv + d * mod + (d / 2) * niv * mod + d * c(F = .5, M = -.5)[v$agent] +
-    d * c(F = .5, N = 0, M = -.5)[v$transcript] + d * c(qa = .5, nav = -.5)[v$tache]
+    d * c(F = .5, N = 0, M = -.5)[v$transcript] + d * c(qa = .5, nav = -.5)[v$tache] +
+    # interaction genre agent × genre transcript : l'effet F − M de l'agent diffère de d entre transcripts F et M
+    d * c(F = .5, M = -.5)[v$agent] * c(F = .5, N = 0, M = -.5)[v$transcript]
   a <- assign_videos(n)
   dat <- data.frame(participant = rep(seq_len(n), each = VIDEOS_PAR_PART), video = unlist(a))
   dat <- cbind(dat, v[dat$video, c("niveau", "modele", "agent", "transcript", "tache", "w", "mu")])
   dat$y <- dat$mu + dat$w + rnorm(n, 0, SD_PART)[dat$participant] + rnorm(nrow(dat), 0, SD_RES)
   for (f in c("participant", "video", "niveau", "modele", "agent", "transcript", "tache")) dat[[f]] <- factor(dat[[f]])
-  m <- suppressMessages(lmer(y ~ niveau * modele + agent + transcript + tache + (1 | participant) + (1 | video), data = dat,
+  m <- suppressMessages(lmer(y ~ niveau * modele + agent * transcript + tache + (1 | participant) + (1 | video), data = dat,
     contrasts = list(niveau = contr.sum, modele = contr.sum, agent = contr.sum, transcript = contr.sum, tache = contr.sum)))
-  at <- anova(m); pl <- at[c("niveau", "modele", "niveau:modele", "agent", "transcript", "tache"), "Pr(>F)"]
+  at <- anova(m); pl <- at[c("niveau", "modele", "niveau:modele", "agent", "transcript", "tache", "agent:transcript"), "Pr(>F)"]
   ao <- suppressMessages(aov_ez("participant", "y", dat, within = c("niveau", "modele"), fun_aggregate = mean, anova_table = list(correction = "GG")))
   pa <- ao$anova_table[c("niveau", "modele", "niveau:modele"), "Pr(>F)"]
-  c(pl, pa)
+  pg <- if (BAL_GT) suppressMessages(aov_ez("participant", "y", dat, within = c("agent", "transcript"), fun_aggregate = mean, anova_table = list(correction = "GG")))$anova_table["agent:transcript", "Pr(>F)"] else NA
+  c(pl, pa, pg)
 }
 
-NAMES <- c("lmm_niveau", "lmm_modele", "lmm_inter", "lmm_agent", "lmm_transcript", "lmm_tache", "anova_niveau", "anova_modele", "anova_inter")
+NAMES <- c("lmm_niveau", "lmm_modele", "lmm_inter", "lmm_agent", "lmm_transcript", "lmm_tache", "lmm_agent_x_transcript", "anova_niveau", "anova_modele", "anova_inter", "anova_agent_x_transcript")
 res <- do.call(rbind, lapply(names(SCENARIOS), function(s) do.call(rbind, lapply(N_GRID, function(n) {
-  ps <- do.call(rbind, mclapply(seq_len(N_SIM), function(i) tryCatch(sim_one(n, SCENARIOS[[s]]), error = function(e) rep(NA, 9)), mc.cores = max(1, detectCores())))
-  pw <- colMeans(ps < ALPHA, na.rm = TRUE); names(pw) <- NAMES
+  ps <- do.call(rbind, mclapply(seq_len(N_SIM), function(i) tryCatch(sim_one(n, SCENARIOS[[s]]), error = function(e) rep(NA, 11)), mc.cores = max(1, detectCores())))
+  pw <- colMeans(ps < ALPHA, na.rm = TRUE); pw[is.nan(pw)] <- NA; names(pw) <- NAMES
   r <- data.frame(scenario = s, d = SCENARIOS[[s]], videos_par_part = VIDEOS_PAR_PART, N = n, t(pw), n_ok = sum(complete.cases(ps)))
   print(r, row.names = FALSE, digits = 2); flush.console(); r
 }))))
