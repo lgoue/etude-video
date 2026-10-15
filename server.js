@@ -357,7 +357,7 @@ app.post(A + '/blocks/:id/move', async (req, res) => {
 // Ajout en lot d'items : un par ligne, même type et mêmes libellés de boutons
 app.post(A + '/blocks/:id/items', async (req, res) => {
   const [b] = await q('select id,experiment_id from blocks where id=$1', [req.params.id]); if (!b) return res.status(404).json({});
-  const x = req.body, kind = x.kind === 'slider' ? 'slider' : 'likert', lines = String(x.text || '').split('\n').map(l => l.trim()).filter(Boolean);
+  const x = req.body, kind = ['slider', 'text'].includes(x.kind) ? x.kind : 'likert', lines = String(x.text || '').split('\n').map(l => l.trim()).filter(Boolean);
   for (const t of lines) await q('insert into questions(experiment_id,kind,text,left_label,right_label,scale,options,section,shuffle,part,block_id) values($1,$2,$3,$4,$5,$6,$7,$8,false,1,$9)', [b.experiment_id, kind, t, x.left_label || '', x.right_label || '', qScale({ kind, options: x.options, scale: x.scale }), x.options || '', (x.section || '').trim(), b.id]);
   res.json({ added: lines.length });
 });

@@ -56,6 +56,7 @@ input[type=range][data-s="0"]::-moz-range-thumb{background:var(--sheet);box-shad
 .sec h3{margin:.4rem 0 .3rem;font-size:1.35rem;line-height:1.3;color:var(--ink);padding:.35rem 0 .35rem .7rem;border-left:5px solid var(--acc);background:var(--sheet);position:sticky;top:calc(var(--hh,0px) + var(--nh,0px));z-index:3;box-shadow:0 6px 8px -6px rgba(20,30,45,.18)}
 /* Consigne de la vidéo répétée au-dessus des questions, qui reste visible en défilant (titres de section juste en dessous) */
 .md>:first-child{margin-top:0}.md p{margin:.7rem 0}.md ul{margin:.5rem 0;padding-left:1.4rem}.md h2,.md h3,.md h4{margin:1rem 0 .5rem}
+.q textarea{display:block;width:100%;margin-top:.5rem;font:inherit;padding:.55rem .75rem;border:1.5px solid var(--line);border-radius:10px;background:var(--sheet);color:var(--ink);resize:vertical}.opt-l{color:var(--mute);font-weight:400}
 .qa{border:1.5px solid var(--line);border-radius:12px;padding:.6rem 1rem;margin:0 0 1rem}.qa p{margin:.3rem 0}
 .note.stick{position:sticky;top:var(--hh,0px);z-index:4;margin:0 0 .8rem;max-height:30vh;overflow:auto;border-radius:0 0 10px 0;box-shadow:0 -6px 0 var(--sheet)}
 #qs{margin-top:.8rem}#nx{margin-top:.6rem}
@@ -127,7 +128,8 @@ function pendingBlock(){
   for(const s of slots){const b=(S.blocks||[]).find(b=>b.slot===s&&!doneBlocks.has(b.id));if(b)return b;}
   return null;
 }
-function collect(qs){const a={};for(const q of qs){const el=q.kind==='likert'?document.querySelector(`input[name=q${q.id}]:checked`):document.querySelector(`input[name=q${q.id}]`);if(!el||(q.kind==='slider'&&el.dataset.s!=='1')){alert('Please answer all the questions (move every slider).');return null;}a[q.id]=+el.value;}return a;}
+// Questions à texte libre : facultatives, réponse enregistrée telle quelle (chaîne)
+function collect(qs){const a={};for(const q of qs){if(q.kind==='text'){const t=document.querySelector(`textarea[name=q${q.id}]`);a[q.id]=t?t.value.trim():'';continue;}const el=q.kind==='likert'?document.querySelector(`input[name=q${q.id}]:checked`):document.querySelector(`input[name=q${q.id}]`);if(!el||(q.kind==='slider'&&el.dataset.s!=='1')){alert('Please answer all the questions (move every slider).');return null;}a[q.id]=+el.value;}return a;}
 function blockPage(b){
   const blk=arrange(1,b.questions,b.shuffle,b.shuffle_sections);
   prog(step());
@@ -190,7 +192,7 @@ function native(v){
   $('#pp').onclick=()=>el.paused?el.play():el.pause();
 }
 function loadYT(){return new Promise(r=>{if(window.YT&&YT.Player)return r();window.onYouTubeIframeAPIReady=r;const s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';document.head.appendChild(s);});}
-const qh=q=>`<div class="q"><b>${esc(q.text)}</b>`+(q.kind==='likert'?`<div class="lk${(q.options||'').includes(';')?' txt':''}">${Array.from({length:q.scale},(_,i)=>`<label><input type="radio" name="q${q.id}" value="${i+1}"><span>${(q.options||'').split(';')[i]?.trim()||i+1}</span></label>`).join('')}</div>`:`<input type="range" min="0" max="100" value="50" name="q${q.id}" data-s="0" oninput="this.dataset.s=1">`)+`<div class="ends"><span>${esc(q.left_label)}</span><span>${esc(q.right_label)}</span></div></div>`;
+const qh=q=>q.kind==='text'?`<div class="q"><b>${esc(q.text)}</b> <small class="opt-l">(optional)</small><textarea name="q${q.id}" rows="3" maxlength="2000"></textarea></div>`:`<div class="q"><b>${esc(q.text)}</b>`+(q.kind==='likert'?`<div class="lk${(q.options||'').includes(';')?' txt':''}">${Array.from({length:q.scale},(_,i)=>`<label><input type="radio" name="q${q.id}" value="${i+1}"><span>${(q.options||'').split(';')[i]?.trim()||i+1}</span></label>`).join('')}</div>`:`<input type="range" min="0" max="100" value="50" name="q${q.id}" data-s="0" oninput="this.dataset.s=1">`)+`<div class="ends"><span>${esc(q.left_label)}</span><span>${esc(q.right_label)}</span></div></div>`;
 // Sections séparées par une ligne ; les questions cochées « aléatoire » sont mélangées entre elles à l'intérieur de leur section, à chaque vidéo
 // shufSec : l'ordre des sections elles-mêmes est tiré au hasard (questionnaires sans vidéo)
 function arrange(part,list,all,shufSec){
@@ -212,12 +214,7 @@ async function show(){
   if(!isYT(v.yt))native(v);else player=new YT.Player('yt',{videoId:v.yt,playerVars:{rel:0,playsinline:1,controls:0,disablekb:1},events:{onError:()=>{const w=$('#w');if(w)w.textContent='This video cannot be played. Please reload the page or contact the research team.';},onStateChange:e=>{if(e.data===0){ended=true;$('#qs').classList.remove('hide');$('#w').remove();}}}});
   if(isYT(v.yt)){guard();$('#pp').onclick=()=>{try{player.getPlayerState()===1?player.pauseVideo():player.playVideo();}catch(e){}};}
   $('#nx').onclick=async()=>{
-    const a={};
-    for(const q of S.questions.filter(q=>(q.part||1)===(v.part||1))){
-      const el=q.kind==='likert'?document.querySelector(`input[name=q${q.id}]:checked`):document.querySelector(`input[name=q${q.id}]`);
-      if(!el||(q.kind==='slider'&&el.dataset.s!=='1'))return alert('Please answer all the questions (move every slider).');
-      a[q.id]=+el.value;
-    }
+    const a=collect(S.questions.filter(q=>(q.part||1)===(v.part||1)));if(!a)return;
     a._seeks=seeks;a._order=blk.order;await api('/api/answer',{session:S.session,video_id:v.id,answers:a,ended});ix++;show();
   };
 }
