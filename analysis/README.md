@@ -58,3 +58,20 @@ Puissance du LMM pour un **petit effet** (d = .2) ; pour d = .35 tous les effets
 
 Faux positifs sans effet réel : LMM ≈ 5 % ; ANOVA par participants 7 à 47 % (à éviter comme analyse principale).
 Résultats : `power_plan_results_vpp12.csv`, `power_plan_results_vpp18.csv`.
+
+## Interaction genre agent × genre transcript (`power_plan.R`, BAL_GT=1)
+
+Effet simulé : la différence agent F − M change de d entre transcripts F et M. Puissance du LMM (`agent * transcript` dans le modèle) :
+
+| Vidéos / participant | N | d = .2 | d = .35 | d = .5 |
+|---|---|---|---|---|
+| 12 | 100 | .23 | .54 | .90 |
+| 12 | 150 | .26 | .71 | .94 |
+| 12 | 200 | .32 | .76 | .96 |
+| 18 | 100 | .30 | .73 | .97 |
+| 18 | 150 | .31 | .76 | .98 |
+| 18 | 200 | .39 | .87 | .99 |
+
+Sans l'équilibrage de la combinaison (18 vidéos, N = 100) : .26 / .75 / .97, donc l'équilibrage change peu la puissance du LMM
+(il garantit surtout que chaque participant voit les 6 combinaisons). L'ANOVA par participants affiche des valeurs plus hautes
+mais n'est pas fiable (faux positifs gonflés, voir plus haut). Résultats : `power_gt_*.csv`.
