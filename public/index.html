@@ -92,15 +92,16 @@ function welcome(rs){
   $('#b').onclick=()=>loadYT().then(show);
 }
 // Avant la seconde partie : ses consignes puis la vérification de leur compréhension
-function partIntro(p,msg=''){
+// prev : réponses déjà données, gardées cochées après une erreur pour ne corriger que ce qui est faux
+function partIntro(p,msg='',prev=[]){
   const cs=compOf(p),txt=instrOf(p);prog(step());
   if(!txt&&!cs.length){S.comp2Done=true;return show();}
   app.innerHTML=`<h2>Part 2</h2>${msg?`<p style="color:#b00">${msg}</p>`:''}<div style="white-space:pre-wrap">${esc(txt)}</div>`+
-    (cs.length?'<h3>Instructions check</h3>':'')+cs.map((c,i)=>`<div class="q"><b>${esc(c.q)}</b>${c.options.map((o,j)=>`<label class="opt"><input type="radio" name="c${i}" value="${j}"> ${esc(o)}</label>`).join('')}</div>`).join('')+`<p><button id="b">${cs.length?'Submit':'Continue'}</button></p>`;
+    (cs.length?'<h3>Instructions check</h3>':'')+cs.map((c,i)=>`<div class="q"><b>${esc(c.q)}</b>${c.options.map((o,j)=>`<label class="opt"><input type="radio" name="c${i}" value="${j}"${prev[i]===j?' checked':''}> ${esc(o)}</label>`).join('')}</div>`).join('')+`<p><button id="b">${cs.length?'Submit':'Continue'}</button></p>`;
   $('#b').onclick=async()=>{
     const a=cs.map((_,i)=>{const r=document.querySelector(`input[name=c${i}]:checked`);return r?+r.value:-1;});
     const r=await api('/api/comp2',{session:S.session,comp:a});
-    if(!r.ok){partIntro(p,'At least one answer is incorrect. Please re-read the instructions and try again.');return scrollTo(0,0);}
+    if(!r.ok){partIntro(p,'At least one answer is incorrect. Please re-read the instructions and try again.',a);return scrollTo(0,0);}
     S.comp2Done=true;show();
   };
 }
@@ -146,13 +147,13 @@ function audio(msg=''){prog((E.consent?1:0)+1);
   $('#p').onclick=()=>beep(n);
   $('#ok').onclick=()=>{if(+$('#n').value===n){audioOk=true;comp();}else audio("Incorrect answer. Please check your sound and try again.");};
 }
-function comp(msg=''){prog((E.consent?1:0)+2);
+function comp(msg='',prev=[]){prog((E.consent?1:0)+2);
   app.innerHTML=`<h2>Instructions check</h2><p style="color:#b00">${msg}</p><details ${msg?'open':''}><summary>Reminder of the instructions</summary><div style="white-space:pre-wrap">${esc(instrOf(E.first)||E.instructions)}</div></details>`+
-  compOf(E.first).map((c,i)=>`<div class="q"><b>${esc(c.q)}</b>${c.options.map((o,j)=>`<label class="opt"><input type="radio" name="c${i}" value="${j}"> ${esc(o)}</label>`).join('')}</div>`).join('')+'<button id="b">Submit</button>';
+  compOf(E.first).map((c,i)=>`<div class="q"><b>${esc(c.q)}</b>${c.options.map((o,j)=>`<label class="opt"><input type="radio" name="c${i}" value="${j}"${prev[i]===j?' checked':''}> ${esc(o)}</label>`).join('')}</div>`).join('')+'<button id="b">Submit</button>';
   $('#b').onclick=async()=>{
     const a=compOf(E.first).map((_,i)=>{const r=document.querySelector(`input[name=c${i}]:checked`);return r?+r.value:-1;});
     const r=await api('/api/start',{experiment_id:E.id,audio_ok:audioOk,attempts,comp:a,consent:consented,prolific:PL,first:E.first});
-    if(r.full)return app.innerHTML='<h2>This study is full</h2><p>All the places have been filled. Thank you for your interest.</p>';if(!r.ok){attempts++;return comp('At least one answer is incorrect. Please re-read the instructions and try again.');}
+    if(r.full)return app.innerHTML='<h2>This study is full</h2><p>All the places have been filled. Thank you for your interest.</p>';if(!r.ok){attempts++;return comp('At least one answer is incorrect. Please re-read the instructions and try again.',a);}
     S=r;S.comp2Done=false;ix=0;doneBlocks=new Set();try{localStorage.setItem('s'+E.id,S.session);}catch(e){}loadYT().then(show);
   };
 }
