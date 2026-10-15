@@ -130,22 +130,23 @@ async function init(){
   if(rs.finished)return finishScreen(rs.code);
   if(rs.resume)return welcome(rs);
   if(E.full)return app.innerHTML='<h2>This study is full</h2><p>All the places have been filled. Thank you for your interest.</p>';
-  $('#title').textContent=E.name;E.consent?consent():intro();
+  $('#title').textContent=E.name;E.consent?consent():audio();
 }
 function prog(k){const c=E.consent?1:0,d=E.has_demo?1:0,V=(S?S.videos.length:E.n_videos+E.n_attention+(E.n_videos2||0)+(E.n_attention2||0))+(S?(S.blocks||[]).length:E.n_blocks||0),tot=c+3+d+V+(E.n_videos2>0?1:0);$('#pb').classList.remove('hide');$('#gp').max=tot;$('#gp').value=Math.min(k,tot);$('#gl').textContent=k>=tot?'Done':`Step ${k+1} / ${tot}`;}
 function consent(){prog(0);
   app.innerHTML=`<h2>Consent</h2><div style="white-space:pre-wrap">${esc(E.consent)}</div><label class="opt"><input type="checkbox" id="c"> I have read this information and agree to take part.</label><p><button id="b" disabled>Continue</button> <button id="r">I do not agree</button></p>`;
   $('#c').onchange=()=>$('#b').disabled=!$('#c').checked;
-  $('#b').onclick=()=>{consented=true;intro();};
+  $('#b').onclick=()=>{consented=true;audio();};
   $('#r').onclick=()=>app.innerHTML='<h2>Thank you</h2><p>You have chosen not to take part in this study. Please return the study on Prolific and close this page.</p>';
 }
-function intro(){prog(E.consent?1:0);app.innerHTML=`<div style="white-space:pre-wrap">${esc(instrOf(E.first)||E.instructions)}</div><p><button id="b">Continue</button></p>`;$('#b').onclick=()=>audio();}
+// Ordre : consentement → test audio → consignes → questions sur les consignes
+function intro(){prog((E.consent?1:0)+1);app.innerHTML=`<div style="white-space:pre-wrap">${esc(instrOf(E.first)||E.instructions)}</div><p><button id="b">Continue</button></p>`;$('#b').onclick=()=>comp();}
 function beep(n){const c=new(window.AudioContext||window.webkitAudioContext)();for(let i=0;i<n;i++){const o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=660;g.gain.value=.3;o.start(c.currentTime+i*.6);o.stop(c.currentTime+i*.6+.3);}}
-function audio(msg=''){prog((E.consent?1:0)+1);
+function audio(msg=''){prog(E.consent?1:0);
   const n=3+Math.floor(Math.random()*4);
   app.innerHTML=`<h2>Audio check</h2><p style="color:#b00">${msg}</p><p>Turn on your device's sound, then listen to the series of beeps.</p><p><button id="p">▶ Listen</button></p><p>How many beeps did you hear? <input id="n" type="number" min="0" max="20" style="width:4rem"> <button id="ok">Submit</button></p>`;
   $('#p').onclick=()=>beep(n);
-  $('#ok').onclick=()=>{if(+$('#n').value===n){audioOk=true;comp();}else audio("Incorrect answer. Please check your sound and try again.");};
+  $('#ok').onclick=()=>{if(+$('#n').value===n){audioOk=true;intro();}else audio("Incorrect answer. Please check your sound and try again.");};
 }
 function comp(msg='',prev=[]){prog((E.consent?1:0)+2);
   app.innerHTML=`<h2>Instructions check</h2><p style="color:#b00">${msg}</p><details ${msg?'open':''}><summary>Reminder of the instructions</summary><div style="white-space:pre-wrap">${esc(instrOf(E.first)||E.instructions)}</div></details>`+
