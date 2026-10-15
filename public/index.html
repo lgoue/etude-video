@@ -83,7 +83,7 @@ const step=()=>(E.consent?1:0)+3+ix+doneBlocks.size+(S&&S.comp2Done?1:0);
 function finishScreen(code){
   prog(1e3);
   const done=code?`<p>To confirm your participation on Prolific, click the button below or enter this completion code:</p><p><b class="code">${esc(code)}</b></p><p><a class="btn" href="https://app.prolific.com/submissions/complete?cc=${encodeURIComponent(code)}">Return to Prolific</a></p>`:'<p>You may now close this page.</p>';
-  app.innerHTML='<h2>Thank you for taking part!</h2><p>Your answers have been recorded.</p>'+done;
+  app.innerHTML=(E&&E.end_message?`<div style="white-space:pre-wrap">${esc(E.end_message)}</div>`:'<h2>Thank you for taking part!</h2><p>Your answers have been recorded.</p>')+done;
 }
 function welcome(rs){
   S=rs;doneBlocks=new Set(rs.blocksDone||[]);demoDone=!!rs.demoDone;ix=rs.videos.findIndex(v=>!rs.answered.includes(v.id));if(ix<0)ix=rs.videos.length;
