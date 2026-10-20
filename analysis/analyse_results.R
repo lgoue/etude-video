@@ -32,9 +32,10 @@ emm_options(lmer.df = "satterthwaite", lmerTest.limit = 1e5, pbkrtest.limit = 1e
 # Working folder (exports are read from it, results written to analysis/results/ inside it). Skipped if it does not exist.
 WORKDIR <- "C:/Users/lucie/Documents/TrustCalibration/Etude TAFFC analyse"
 if (dir.exists(WORKDIR)) setwd(WORKDIR)
-# Running from RStudio ("Source")? Uncomment and set the files here: input exports first, output folder last (optional)
-# args <- c("exportS1.csv", "exportS2.csv")
-if (!exists("args") || !length(args)) args <- commandArgs(trailingOnly = TRUE)
+# Running from RStudio ("Source")? Put the files here: input exports first, output folder last (optional).
+# Leave it empty to give the files on the command line instead (Rscript analysis/analyse_results.R exportS1.csv exportS2.csv).
+RUN_ARGS <- c()   # e.g. c("exportS1.csv", "exportS2.csv")
+args <- if (length(RUN_ARGS)) RUN_ARGS else commandArgs(trailingOnly = TRUE)
 FILES <- args[grepl("\\.csv$", args, ignore.case = TRUE)]
 if (!length(FILES)) FILES <- "export.csv"
 OUT <- c(args[!grepl("\\.csv$", args, ignore.case = TRUE)], file.path("analysis", "results"))[1]
@@ -348,9 +349,14 @@ for (spec in list(list(dv = "trustworthiness", w = c("level", "model")), list(dv
 # S2: the reverse), always with the two 7-point items. Here the two ratings are put side by side, one row per video.
 title("8. ABILITY AND BENEVOLENCE RATINGS OF EACH VIDEO (2-item 7-point scores)")
 vkey <- c("video", "task", "dimension", "level", "model", "agent_gender", "transcript_gender", "transcript_no")
-vmean <- function(dv) { d <- D[!is.na(D[[dv]]), ]; if (!nrow(d)) return(NULL)
-  a <- aggregate(d[[dv]], d[vkey], function(x) c(n = length(x), mean = mean(x), sd = sd(x))); cbind(a[vkey], setNames(as.data.frame(a$x), paste0(dv, c("_n", "_mean", "_sd")))) }
+# Grouping columns as text, with empty values kept as "" (aggregate() would otherwise drop every row where one of them is missing)
+VK <- as.data.frame(lapply(D[vkey], function(x) { x <- as.character(x); x[is.na(x)] <- ""; x }), stringsAsFactors = FALSE)
+vmean <- function(dv) { ok <- !is.na(D[[dv]]); if (!any(ok)) return(NULL)
+  a <- aggregate(D[[dv]][ok], VK[ok, , drop = FALSE], function(x) c(n = length(x), mean = mean(x), sd = if (length(x) > 1) sd(x) else NA))
+  if (!nrow(a)) return(NULL)
+  cbind(a[vkey], setNames(as.data.frame(matrix(a$x, nrow = nrow(a))), paste0(dv, c("_n", "_mean", "_sd")))) }
 V <- Reduce(function(a, b) if (is.null(b)) a else merge(a, b, all = TRUE), lapply(c("ability_score", "benevolence_score", "ability_3pt", "benevolence_3pt", "trust", "followed"), vmean))
+V$level <- factor(V$level, levels = intersect(c("Low", "Medium", "High", ""), unique(V$level)))
 for (s0 in STUDIES) { st <- unique(D[D$study == s0, c("video", "measured")]); V[[paste0("rated_in_", s0)]] <- st$measured[match(V$video, st$video)] }
 write.csv(V, file.path(OUT, "data_videos.csv"), row.names = FALSE)
 both <- complete.cases(V$ability_score_mean, V$benevolence_score_mean)
