@@ -29,7 +29,12 @@ emm_options(lmer.df = "satterthwaite", lmerTest.limit = 1e5, pbkrtest.limit = 1e
 # =====================================================================================================
 # SETTINGS: check these before running
 # =====================================================================================================
-args <- commandArgs(trailingOnly = TRUE)
+# Working folder (exports are read from it, results written to analysis/results/ inside it). Skipped if it does not exist.
+WORKDIR <- "C:/Users/lucie/Documents/TrustCalibration/Etude TAFFC analyse"
+if (dir.exists(WORKDIR)) setwd(WORKDIR)
+# Running from RStudio ("Source")? Uncomment and set the files here: input exports first, output folder last (optional)
+# args <- c("exportS1.csv", "exportS2.csv")
+if (!exists("args") || !length(args)) args <- commandArgs(trailingOnly = TRUE)
 FILES <- args[grepl("\\.csv$", args, ignore.case = TRUE)]
 if (!length(FILES)) FILES <- "export.csv"
 OUT <- c(args[!grepl("\\.csv$", args, ignore.case = TRUE)], file.path("analysis", "results"))[1]
