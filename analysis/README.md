@@ -75,3 +75,10 @@ Effet simulé : la différence agent F − M change de d entre transcripts F et 
 Sans l'équilibrage de la combinaison (18 vidéos, N = 100) : .26 / .75 / .97, donc l'équilibrage change peu la puissance du LMM
 (il garantit surtout que chaque participant voit les 6 combinaisons). L'ANOVA par participants affiche des valeurs plus hautes
 mais n'est pas fiable (faux positifs gonflés, voir plus haut). Résultats : `power_gt_*.csv`.
+
+# Analyse des résultats (`analyse_results.R`)
+
+`Rscript analysis/analyse_results.R export.csv [dossier]` : lit l'export CSV de l'admin, applique les exclusions
+(réglages en tête du script), calcule les scores (capacité, bienveillance, confiance, questionnaires) et ajuste les modèles
+mixtes `vd ~ niveau * dimension + niveau * modèle + genre agent * genre transcript + tâche + (1 | participant) + (1 | vidéo)`.
+Sorties dans `analysis/results/` (ignoré par git, car il contient des données de participants).
