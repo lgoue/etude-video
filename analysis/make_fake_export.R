@@ -1,7 +1,10 @@
 # Builds a FAKE export (same columns as the admin CSV export) to test analyse_results.R.
 #
-# Usage: Rscript analysis/make_fake_export.R real_export.csv fake_export.csv [n_participants]
+# Usage: Rscript analysis/make_fake_export.R real_export.csv fake_export.csv [n_participants] [study_prefix] [seed] [other_prefix]
+#   other_prefix: participant 10 reuses the Prolific ID of participant 10 of that other fake study (tests the repeat-participant exclusion)
 # The real export is only used as a column template: every answer in the fake file is randomly generated.
+# Which task each rating block belongs to is read from the item wording: items about the "answer" are QA, about the "path" Nav
+# (S1: ability after QA, benevolence after Nav; S2: the reverse). Advice/confidence items: first column QA, second Nav.
 #
 # Planted effects (what analyse_results.R should find):
 #   - level: Low < Medium < High on ability/benevolence, advice trust and following the recommendation
@@ -14,7 +17,9 @@ invisible(suppressWarnings(Sys.setlocale("LC_CTYPE", "C.UTF-8")))
 args <- commandArgs(TRUE)
 if (length(args) < 2) stop("Usage: Rscript analysis/make_fake_export.R real_export.csv fake_export.csv [n_participants]")
 N <- if (length(args) >= 3) as.integer(args[3]) else 80
-set.seed(42)
+PREFIX <- if (length(args) >= 4) args[4] else "FAKE"
+set.seed(if (length(args) >= 5) as.integer(args[5]) else 42)
+OTHER <- if (length(args) >= 6) args[6] else NA
 
 lines <- readLines(args[1], encoding = "UTF-8", warn = FALSE); lines[1] <- sub("^﻿", "", lines[1])
 tpl <- read.csv(text = lines, check.names = FALSE, stringsAsFactors = FALSE, colClasses = "character")
@@ -36,7 +41,7 @@ for (p in seq_len(N)) {
   nv <- pool[pool$task == "Nav", ][sample(sum(pool$task == "Nav"), 18), ]
   v <- rbind(qa, nv); n <- nrow(v); is_qa <- v$task == "QA"
   r <- as.data.frame(matrix("", n, length(cols), dimnames = list(NULL, cols)), check.names = FALSE, stringsAsFactors = FALSE)
-  r$participant <- as.character(p); r$prolific_pid <- sprintf("FAKE%06d", p); r$session_id <- sprintf("fake-session-%04d", p)
+  r$participant <- as.character(p); r$prolific_pid <- sprintf("%s%06d", PREFIX, p); r$session_id <- sprintf("fake-%s-%04d", tolower(PREFIX), p)
   r$pos <- as.character(seq_len(n) - 1); r$part <- ifelse(is_qa, "1", "2")
   for (k in c("video_name", "ability", "gender", "task", "transcript", "model", "dimension")) r[[k]] <- v[[k]]
   r$yt <- paste0("https://example.org/", v$video_name, ".mp4")
@@ -59,12 +64,17 @@ for (p in seq_len(N)) {
   qn <- as.numeric(r$question_no); rec_is_1 <- ifelse(is_qa, qn %% 2 == 0, qn %in% c(0, 2))     # option 1 = A (QA) / Left (Nav)
   follow <- runif(n) < plogis(.4 + .8 * lvl[v$ability])
   ch <- ifelse(follow == rec_is_1, "1", "2")
-  set <- function(pat, val, rows_) { c0 <- colx(pat); r[[c0]] <<- ifelse(rows_, val, "") }
-  set("^I would answer", ch, is_qa); set("^I would take the", ch, !is_qa)
-  set("knowledge of the right", lik(), is_qa); set("very capable of indicating", lik(), is_qa); set("assess the character.s ability", three(), is_qa)
-  set("advice \\(q25", lik(.2), is_qa); set("^\\s*I am confident in my answers", lik(), is_qa)
-  set("go out of its way", lik(), !is_qa); set("needs and desires", lik(), !is_qa); set("evaluate the character.s benevolence", three(), !is_qa)
-  set("advice \\(q26", lik(.2), !is_qa); set("^\\s*I feel confident about my answers", lik(), !is_qa)
+  set <- function(c0, val, rows_) r[[c0]] <<- ifelse(rows_, val, "")
+  task_of <- function(c0) if (grepl("answer", c0)) is_qa else !is_qa        # the item wording says which task it follows
+  set(colx("^I would answer"), ch, is_qa); set(colx("^I would take the"), ch, !is_qa)
+  ab <- c(colx("knowledge of the right"), colx("very capable of indicating"), colx("assess the character.s ability")); qa_ab <- grepl("answer", ab[1])
+  be <- c(colx("go out of its way"), colx("needs and desires"), colx("evaluate the character.s benevolence"))
+  set(ab[1], lik(), task_of(ab[1])); set(ab[2], lik(), task_of(ab[1])); set(ab[3], three(), task_of(ab[1]))
+  be_rows <- if (qa_ab) !is_qa else is_qa
+  set(be[1], lik(), be_rows); set(be[2], lik(), be_rows); set(be[3], three(), be_rows)
+  adv <- grep("confident in the virtual character's advice", cols, value = TRUE)
+  set(adv[1], lik(.2), is_qa); set(adv[2], lik(.2), !is_qa)
+  set(colx("^\\s*I am confident in my answers"), lik(), is_qa); set(colx("^\\s*I feel confident about my answers"), lik(), !is_qa)
   r$question_order <- ifelse(is_qa, "252|254|255|256|257|258", "253|259|260|261|262|263")
 
   # Edge cases that analyse_results.R must exclude
@@ -73,6 +83,7 @@ for (p in seq_len(N)) {
   if (p == 5) r[["Sexism | Select 5"]] <- "4"                                                 # failed an instructed item
   if (p == 6) { tr <- r[1, ]; tr$video_name <- "ATTENTION_CHECK"; tr$attention <- "true"; tr$attention_passed <- "false"; r <- rbind(r, tr) }  # failed trap
   if (p == 7) set_demo("pay attention", 1)                                                    # self-reported inattentive
+  if (p == 10 && !is.na(OTHER)) r$prolific_pid <- sprintf("%s%06d", OTHER, p)              # already took part in the other study
   rows[[p]] <- r
 }
 out <- do.call(rbind, rows)

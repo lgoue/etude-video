@@ -1,6 +1,7 @@
-# Analysis of the study results, from the CSV exported by the admin page ("Exporter CSV").
+# Analysis of the study results, from the CSV files exported by the admin page ("Exporter CSV").
 #
-# Usage:   Rscript analysis/analyse_results.R path/to/export.csv [output_folder]
+# Usage:   Rscript analysis/analyse_results.R exportS1.csv [exportS2.csv ...] [output_folder]
+#          Several exports (one per study) are combined; each file's name (without "export" and ".csv") becomes its "study" label.
 # Output:  output_folder (default: analysis/results/) gets
 #            report.txt              all tests and tables, in reading order
 #            data_trials.csv         clean data, one row per participant x video (scores computed)
@@ -8,15 +9,17 @@
 #            *.png                   figures
 # Packages: lme4, lmerTest, emmeans, afex, ggplot2, ordinal
 #
-# Design (from the export): each row is one video seen by one participant.
-#   Part 1 = QA videos, rated on ABILITY items; part 2 = Nav videos, rated on BENEVOLENCE items.
-#   Both parts: advice trust ("I feel confident in the virtual character's advice"), self-confidence, a choice (2 options).
+# Design (from the exports): each row is one video seen by one participant.
+#   Each video is rated on ABILITY items or on BENEVOLENCE items (which one depends on the study and the task: in S1 ability
+#   is rated after QA videos and benevolence after Nav videos, in S2 the reverse). The script finds this from the data:
+#   whichever items are filled in on a row are the ones used for that row, so question numbers do not matter.
+#   Every video: advice trust ("I feel confident in the virtual character's advice"), self-confidence, a choice (2 options).
 #   Video factors: level (Low/Medium/High), dimension manipulated (Ability/Benevolence), model (GPT/Gemma/Mistral),
-#   agent gender (Femme/Homme), transcript gender (Femme/Homme/Neutre), task (QA/Nav).
+#   agent gender (Femme/Homme), transcript gender (Femme/Homme/Neutre), task (QA/Nav), plus study (S1/S2...).
 #   Main analysis: linear mixed models with crossed random intercepts for participants and videos.
 
 suppressMessages({ library(lme4); library(lmerTest); library(emmeans); library(afex); library(ggplot2); library(ordinal) })
-# The export is UTF-8 (curly quotes, "…"): make sure R handles it even if the session locale is not UTF-8
+# The exports are UTF-8 (curly quotes, "…"): make sure R handles them even if the session locale is not UTF-8
 if (!isTRUE(l10n_info()$`UTF-8`)) for (loc in c("C.UTF-8", "en_US.UTF-8", "fr_FR.UTF-8")) if (nzchar(suppressWarnings(Sys.setlocale("LC_CTYPE", loc)))) break
 options(width = 160, contrasts = c("contr.sum", "contr.poly"))
 emm_options(lmer.df = "satterthwaite", lmerTest.limit = 1e5, pbkrtest.limit = 1e5)
@@ -25,8 +28,12 @@ emm_options(lmer.df = "satterthwaite", lmerTest.limit = 1e5, pbkrtest.limit = 1e
 # SETTINGS: check these before running
 # =====================================================================================================
 args <- commandArgs(trailingOnly = TRUE)
-FILE <- if (length(args) >= 1) args[1] else "export.csv"
-OUT  <- if (length(args) >= 2) args[2] else file.path("analysis", "results")
+FILES <- args[grepl("\\.csv$", args, ignore.case = TRUE)]
+if (!length(FILES)) FILES <- "export.csv"
+OUT <- c(args[!grepl("\\.csv$", args, ignore.case = TRUE)], file.path("analysis", "results"))[1]
+study_label <- function(f) {   # "exportS1.csv", "fake_exportS1.csv" -> "S1"; otherwise the file name
+  s <- sub("\\.csv$", "", basename(f), ignore.case = TRUE); m <- regmatches(s, regexpr("S[0-9]+$", s))
+  if (length(m)) m else sub("^export[_ -]*", "", s, ignore.case = TRUE) }
 
 # Exclusions (participant level)
 EXCLUDE_NOT_COMPLETED  <- TRUE   # keep only completed sessions
@@ -35,11 +42,11 @@ EXCLUDE_FAILED_TRAPS   <- TRUE   # failed at least one attention-check video
 EXCLUDE_FAILED_INSTRUCTED <- TRUE # wrong answer to an instructed item ("Select 5", "Select 3", "Select 7")
 MAX_COMP_ATTEMPTS      <- Inf    # e.g. 3 to exclude people who needed more than 3 tries at the instructions check
 SELF_ATTENTION_MIN     <- 2      # self-reported attention: 1 = inattentive, so answers below 2 are excluded (NA = no exclusion)
-
+EXCLUDE_REPEAT_PID     <- TRUE   # same Prolific ID in several sessions/studies: keep only the first one (file order, then date)
 
 # Stereotype questionnaire: the two blocks of 16 adjectives. Which group did each block ask about?
-STEREO_TARGET_1 <- "men"     # first block (q189-q204)
-STEREO_TARGET_2 <- "women"   # second block (q206-q221)
+STEREO_TARGET_1 <- "men"     # first block
+STEREO_TARGET_2 <- "women"   # second block
 
 # Choice items ("I would answer" / "I would take the"): value 1 or 2 = first or second option shown.
 # Behavioural trust = following the agent's recommendation:
@@ -54,164 +61,142 @@ REPORT <- file(file.path(OUT, "report.txt"), open = "wt")
 say <- function(...) { txt <- paste0(...); cat(txt, "\n"); cat(txt, "\n", file = REPORT) }
 show <- function(x) { out <- capture.output(print(x)); cat(out, sep = "\n"); cat(out, sep = "\n", file = REPORT); cat("\n", file = REPORT) }
 title <- function(x) say("\n", strrep("=", 100), "\n", x, "\n", strrep("=", 100))
-
-# =====================================================================================================
-# 1. READ AND NAME COLUMNS
-# =====================================================================================================
-# Read as UTF-8 whatever the computer's locale (the export contains curly quotes and "…"), and drop the byte-order mark
-lines <- readLines(FILE, encoding = "UTF-8", warn = FALSE); lines[1] <- sub("^\ufeff", "", lines[1])
-raw <- read.csv(text = lines, check.names = FALSE, stringsAsFactors = FALSE, na.strings = c("", "NA"), encoding = "UTF-8")
-nm <- names(raw)
-col <- function(pattern, required = TRUE, all = FALSE) {
-  i <- grep(pattern, nm, perl = TRUE, ignore.case = TRUE)
-  if (!length(i)) { if (required) stop("Column not found: ", pattern); return(if (all) character(0) else NA_character_) }
-  if (all) nm[i] else nm[i[1]]
-}
 num <- function(x) suppressWarnings(as.numeric(x))
 lgl <- function(x) tolower(as.character(x)) %in% c("true", "t", "1")
 rmean <- function(lst) rowMeans(do.call(cbind, lst), na.rm = TRUE)   # row means of a list of equal-length vectors (safe with 1 row)
 
-# Per-video items (patterns match the question text; adapt them if you rename questions)
-ITEMS <- list(
-  qa_choice   = col("^I would answer"),
-  nav_choice  = col("^I would take the"),
-  abil_1      = col("confident about the virtual character's knowledge"),
-  abil_2      = col("very capable of indicating"),
-  abil_3      = col("assess the character.s ability"),
-  qa_trust    = col("confident in the virtual character's advice.*q25"),
-  qa_selfconf = col("^\\s*I am confident in my answers"),
-  bene_1      = col("go out of its way to help"),
-  bene_2      = col("needs and desires are very important"),
-  bene_3      = col("evaluate the character.s benevolence"),
-  nav_trust   = col("confident in the virtual character's advice.*q26"),
-  nav_selfconf= col("^\\s*I feel confident about my answers")
-)
-
 # =====================================================================================================
-# 2. PARTICIPANT-LEVEL DATA: questionnaires and exclusions
+# 1. READ EACH EXPORT: participant table P and video table D
 # =====================================================================================================
-first_row <- raw[!duplicated(raw$session_id), ]
-P <- data.frame(participant = first_row$participant, session_id = first_row$session_id, prolific_pid = first_row$prolific_pid,
-                completed = lgl(first_row$completed), rejected = lgl(first_row$rejected), abandoned = lgl(first_row$abandoned),
-                comp_attempts = num(first_row$comp_attempts), comp2_attempts = num(first_row$comp2_attempts),
-                part_order = first_row$part_order, stringsAsFactors = FALSE)
-
-# Attention-check videos
-trap <- aggregate(cbind(n_traps = lgl(raw$attention), failed = lgl(raw$attention) & !lgl(raw$attention_passed)) ~ session_id, raw, sum)
-P <- merge(P, trap, all.x = TRUE)
-
-# Instructed items: "Select 5" must be 5, etc.
-instr <- col("\\| Select [0-9]+$", required = FALSE, all = TRUE)
-P$instructed_failed <- if (length(instr)) rowSums(do.call(cbind, lapply(instr, function(c) num(first_row[[c]][match(P$session_id, first_row$session_id)]) != as.numeric(sub(".*Select ", "", c)))), na.rm = TRUE) else 0
-
-# Stereotypes: 2 blocks x 16 adjectives (8 agentic, 8 communal)
 AGENTIC  <- c("Competent", "Effective", "Productive", "Task-Oriented", "Dominant", "Bold", "Assertive", "Competitive")
 COMMUNAL <- c("Understanding", "Kind", "Compassionate", "Sympathetic", "Likeable", "Communicative", "Collaborative", "Relationship-oriented")
-stereo_cols <- col("^Sexism \\| (?!Select)", required = FALSE, all = TRUE)
-fr <- first_row[match(P$session_id, first_row$session_id), ]
-if (length(stereo_cols) >= 32) {
-  b1 <- stereo_cols[1:16]; b2 <- stereo_cols[17:32]
-  adj <- function(cols, words) cols[sub("^Sexism \\| (.*?)( \\(q[0-9]+\\))?$", "\\1", cols, perl = TRUE) %in% words]
-  m <- function(cols) rmean(lapply(cols, function(c) num(fr[[c]])))
-  P[[paste0("agency_", STEREO_TARGET_1)]]   <- m(adj(b1, AGENTIC));  P[[paste0("communion_", STEREO_TARGET_1)]] <- m(adj(b1, COMMUNAL))
-  P[[paste0("agency_", STEREO_TARGET_2)]]   <- m(adj(b2, AGENTIC));  P[[paste0("communion_", STEREO_TARGET_2)]] <- m(adj(b2, COMMUNAL))
-  # Traditional gender stereotype index: men seen as more agentic and women as more communal (higher = more stereotypical)
-  if (setequal(c(STEREO_TARGET_1, STEREO_TARGET_2), c("women", "men")))
-    P$stereotype_index <- ((P$agency_men - P$agency_women) + (P$communion_women - P$communion_men)) / 2
-}
-
-# Attitude toward AI (mean of the 6 items, all positively worded)
-atai <- col("^Attitude toward AI \\|", required = FALSE, all = TRUE)
-if (length(atai)) P$attitude_ai <- rmean(lapply(atai, function(c) num(fr[[c]])))
-
-# BFI-S (15 items, 1-7, reversed items marked R)
 BFI <- list(extraversion = c("is talkative", "R:is reserved", "is outgoing"), agreeableness = c("R:is sometimes rude", "has a forgiving", "is considerate"),
             conscientiousness = c("does a thorough", "R:tends to be lazy", "does things efficiently"), neuroticism = c("worries a lot", "gets nervous", "R:is relaxed"),
             openness = c("is original", "values artistic", "active imagination"))
-for (tr in names(BFI)) {
-  v <- lapply(BFI[[tr]], function(it) { rev <- startsWith(it, "R:"); c0 <- col(paste0("^BFI-S \\|.*", sub("^R:", "", it)), required = FALSE); if (is.na(c0)) return(rep(NA, nrow(P))); x <- num(fr[[c0]]); if (rev) 8 - x else x })
-  P[[paste0("bfi_", tr)]] <- rmean(v)
+
+read_export <- function(file, study) {
+  # Read as UTF-8 whatever the computer's locale, and drop the byte-order mark
+  lines <- readLines(file, encoding = "UTF-8", warn = FALSE); lines[1] <- sub("^﻿", "", lines[1])
+  raw <- read.csv(text = lines, check.names = FALSE, stringsAsFactors = FALSE, na.strings = c("", "NA"), encoding = "UTF-8", colClasses = "character")
+  nm <- names(raw)
+  col <- function(pattern, all = FALSE) { i <- grep(pattern, nm, perl = TRUE, ignore.case = TRUE); if (all) nm[i] else if (length(i)) nm[i[1]] else NA_character_ }
+  # Value of the first non-empty column among those matching the pattern (each row fills only the items of its own task)
+  pick <- function(pattern, rows = raw) { cs <- col(pattern, all = TRUE); if (!length(cs)) stop(file, ": no column matches ", pattern)
+    v <- rep(NA_real_, nrow(rows)); for (c0 in cs) v <- ifelse(is.na(v), num(rows[[c0]]), v); v }
+
+  # ---- Participants
+  fr <- raw[!duplicated(raw$session_id), ]
+  P <- data.frame(study = study, participant = paste0(study, "_", fr$participant), session_id = fr$session_id, prolific_pid = fr$prolific_pid,
+                  completed = lgl(fr$completed), rejected = lgl(fr$rejected), abandoned = lgl(fr$abandoned),
+                  comp_attempts = num(fr$comp_attempts), comp2_attempts = num(fr$comp2_attempts), part_order = fr$part_order, stringsAsFactors = FALSE)
+  P$n_traps <- as.vector(tapply(lgl(raw$attention), raw$session_id, sum)[P$session_id])
+  P$failed  <- as.vector(tapply(lgl(raw$attention) & !lgl(raw$attention_passed), raw$session_id, sum)[P$session_id])
+  instr <- col("\\| Select [0-9]+$", all = TRUE)                                   # "Select 5" must be 5, etc.
+  P$instructed_failed <- if (length(instr)) rowSums(do.call(cbind, lapply(instr, function(c) num(fr[[c]]) != as.numeric(sub(".*Select ", "", c)))), na.rm = TRUE) else 0
+  stereo <- col("^Sexism \\| (?!Select)", all = TRUE)                              # 2 blocks x 16 adjectives (8 agentic, 8 communal)
+  if (length(stereo) >= 32) {
+    adj <- function(cols, words) cols[sub("^Sexism \\| (.*?)( \\(q[0-9]+\\))?$", "\\1", cols, perl = TRUE) %in% words]
+    m <- function(cols) rmean(lapply(cols, function(c) num(fr[[c]])))
+    b1 <- stereo[1:16]; b2 <- stereo[17:32]
+    P[[paste0("agency_", STEREO_TARGET_1)]] <- m(adj(b1, AGENTIC)); P[[paste0("communion_", STEREO_TARGET_1)]] <- m(adj(b1, COMMUNAL))
+    P[[paste0("agency_", STEREO_TARGET_2)]] <- m(adj(b2, AGENTIC)); P[[paste0("communion_", STEREO_TARGET_2)]] <- m(adj(b2, COMMUNAL))
+    # Traditional gender stereotype index: men seen as more agentic and women as more communal (higher = more stereotypical)
+    if (setequal(c(STEREO_TARGET_1, STEREO_TARGET_2), c("women", "men")))
+      P$stereotype_index <- ((P$agency_men - P$agency_women) + (P$communion_women - P$communion_men)) / 2
+  }
+  atai <- col("^Attitude toward AI \\|", all = TRUE)                               # 6 items, all positively worded
+  if (length(atai)) P$attitude_ai <- rmean(lapply(atai, function(c) num(fr[[c]])))
+  for (tr in names(BFI)) P[[paste0("bfi_", tr)]] <- rmean(lapply(BFI[[tr]], function(it) {   # BFI-S, 1-7, R = reversed
+    c0 <- col(paste0("^BFI-S \\|.*", sub("^R:", "", it))); if (is.na(c0)) return(rep(NA, nrow(P))); x <- num(fr[[c0]]); if (startsWith(it, "R:")) 8 - x else x }))
+  for (c0 in col("^Demographique \\|", all = TRUE)) P[[paste0("demo_", substr(gsub("[^a-z0-9]+", "_", tolower(sub("^Demographique \\| ", "", c0))), 1, 40))]] <- fr[[c0]]
+  c_att <- col("how carefully did you pay attention")
+  P$self_attention <- if (!is.na(c_att)) num(fr[[c_att]]) else NA
+
+  # ---- Videos (attention checks removed)
+  r <- raw[!lgl(raw$attention), ]
+  D <- data.frame(
+    study = study, participant = paste0(study, "_", r$participant), session_id = r$session_id, video = r$video_name, pos = num(r$pos), part = r$part,
+    task = r$task, dimension = r$dimension, level = r$ability, model = r$model, agent_gender = r$gender, transcript_gender = r$transcript,
+    question_no = r$question_no,
+    abil_1 = pick("confident about the virtual character's knowledge", r), abil_2 = pick("very capable of indicating", r), ability_3pt = pick("assess the character.s ability", r),
+    bene_1 = pick("go out of its way to help", r), bene_2 = pick("needs and desires are very important", r), benevolence_3pt = pick("evaluate the character.s benevolence", r),
+    trust = pick("confident in the virtual character's advice", r),
+    self_confidence = pick("^\\s*I (am confident in my answers|feel confident about my answers)", r),
+    choice = ifelse(r$task == "QA", pick("^I would answer", r), pick("^I would take the", r)),
+    stringsAsFactors = FALSE)
+  list(P = P, D = D)
 }
 
-# Demographics and other single items
-demo_cols <- col("^Demographique \\|", required = FALSE, all = TRUE)
-short <- function(x) gsub("[^a-z0-9]+", "_", tolower(sub("^Demographique \\| ", "", x)))
-for (c0 in demo_cols) P[[paste0("demo_", substr(short(c0), 1, 40))]] <- fr[[c0]]
-c_att <- col("how carefully did you pay attention", required = FALSE)
-P$self_attention <- if (!is.na(c_att)) num(fr[[c_att]]) else NA
+title("1. FILES")
+parts <- lapply(FILES, function(f) { s <- study_label(f); say(sprintf("%-6s <- %s", s, f)); read_export(f, s) })
+P <- do.call(rbind, lapply(parts, function(x) x$P[, Reduce(intersect, lapply(parts, function(y) names(y$P)))]))
+D <- do.call(rbind, lapply(parts, `[[`, "D"))
+STUDIES <- unique(P$study)
 
-# Exclusion flags
-P$excl_not_completed <- EXCLUDE_NOT_COMPLETED & !P$completed
-P$excl_rejected      <- EXCLUDE_REJECTED & (P$rejected | P$abandoned)
-P$excl_traps         <- EXCLUDE_FAILED_TRAPS & P$failed > 0
-P$excl_instructed    <- EXCLUDE_FAILED_INSTRUCTED & P$instructed_failed > 0
-P$excl_comp          <- !is.na(P$comp_attempts) & P$comp_attempts > MAX_COMP_ATTEMPTS
+# =====================================================================================================
+# 2. EXCLUSIONS
+# =====================================================================================================
+P$excl_not_completed  <- EXCLUDE_NOT_COMPLETED & !P$completed
+P$excl_rejected       <- EXCLUDE_REJECTED & (P$rejected | P$abandoned)
+P$excl_traps          <- EXCLUDE_FAILED_TRAPS & P$failed > 0
+P$excl_instructed     <- EXCLUDE_FAILED_INSTRUCTED & P$instructed_failed > 0
+P$excl_comp           <- !is.na(P$comp_attempts) & P$comp_attempts > MAX_COMP_ATTEMPTS
 P$excl_self_attention <- !is.na(SELF_ATTENTION_MIN) & !is.na(P$self_attention) & P$self_attention < SELF_ATTENTION_MIN
-P$excluded <- with(P, excl_not_completed | excl_rejected | excl_traps | excl_instructed | excl_comp | excl_self_attention)
+pid <- ifelse(is.na(P$prolific_pid) | P$prolific_pid == "", NA, P$prolific_pid)
+P$excl_repeat_pid     <- EXCLUDE_REPEAT_PID & !is.na(pid) & duplicated(pid)
+P$excluded <- with(P, excl_not_completed | excl_rejected | excl_traps | excl_instructed | excl_comp | excl_self_attention | excl_repeat_pid)
 
-title("1. PARTICIPANTS AND EXCLUSIONS")
-say("Sessions in the file: ", nrow(P))
-for (f in grep("^excl_", names(P), value = TRUE)) say(sprintf("  %-22s %d", f, sum(P[[f]])))
-say("Participants kept: ", sum(!P$excluded))
+title("2. PARTICIPANTS AND EXCLUSIONS")
+ex <- sapply(split(P, P$study)[STUDIES], function(p) c(sessions = nrow(p), sapply(p[grep("^excl_", names(p))], sum), kept = sum(!p$excluded)))
+show(cbind(ex, total = rowSums(ex)))
 if (!any(!P$excluded)) { say("No participant left after exclusions: nothing to analyse. Check the exclusion settings at the top of the script."); close(REPORT); quit(save = "no") }
-write.csv(P, file.path(OUT, "data_participants.csv"), row.names = FALSE)
 
 # =====================================================================================================
-# 3. TRIAL-LEVEL DATA
+# 3. SCORES PER VIDEO
 # =====================================================================================================
-D <- raw[raw$session_id %in% P$session_id[!P$excluded] & !lgl(raw$attention), ]
-LEVELS <- list(level = c("Low", "Medium", "High"))
-D <- data.frame(
-  participant = factor(D$participant), session_id = D$session_id, video = factor(D$video_name), pos = num(D$pos), part = factor(D$part),
-  task = factor(D$task), dimension = factor(D$dimension), level = factor(D$ability, levels = LEVELS$level),
-  model = factor(D$model), agent_gender = factor(D$gender), transcript_gender = factor(D$transcript),
-  question_no = D$question_no, qa_answer_a = D$qa_answer_a, qa_answer_b = D$qa_answer_b,
-  abil_1 = num(D[[ITEMS$abil_1]]), abil_2 = num(D[[ITEMS$abil_2]]), ability_3pt = num(D[[ITEMS$abil_3]]),
-  bene_1 = num(D[[ITEMS$bene_1]]), bene_2 = num(D[[ITEMS$bene_2]]), benevolence_3pt = num(D[[ITEMS$bene_3]]),
-  trust = ifelse(D$task == "QA", num(D[[ITEMS$qa_trust]]), num(D[[ITEMS$nav_trust]])),
-  self_confidence = ifelse(D$task == "QA", num(D[[ITEMS$qa_selfconf]]), num(D[[ITEMS$nav_selfconf]])),
-  choice = ifelse(D$task == "QA", num(D[[ITEMS$qa_choice]]), num(D[[ITEMS$nav_choice]])),
-  stringsAsFactors = FALSE)
+D <- D[D$session_id %in% P$session_id[!P$excluded], ]
+fac <- function(x, lv = NULL) factor(x, levels = if (is.null(lv)) sort(unique(x)) else lv)
+for (f0 in c("study", "participant", "video", "task", "dimension", "model", "agent_gender", "transcript_gender", "part")) D[[f0]] <- fac(D[[f0]])
+D$level <- fac(D$level, c("Low", "Medium", "High")); D$study <- fac(as.character(D$study), STUDIES)
 # Scores: mean of the two 7-point items (1-7); the 3-point item is analysed separately
-D$ability_score     <- (D$abil_1 + D$abil_2) / 2     # QA videos
-D$benevolence_score <- (D$bene_1 + D$bene_2) / 2     # Nav videos
-# Trustworthiness = the dimension measured for this task (ability on QA, benevolence on Nav)
-D$trustworthiness     <- ifelse(D$task == "QA", D$ability_score, D$benevolence_score)   # 1-7
-D$trustworthiness_3pt <- ifelse(D$task == "QA", D$ability_3pt, D$benevolence_3pt)       # 1-3
+D$ability_score     <- (D$abil_1 + D$abil_2) / 2
+D$benevolence_score <- (D$bene_1 + D$bene_2) / 2
+# Trustworthiness = whichever dimension was rated on this row (ability or benevolence)
+D$measured <- factor(ifelse(!is.na(D$ability_score), "Ability", ifelse(!is.na(D$benevolence_score), "Benevolence", NA)))
+D$trustworthiness     <- ifelse(D$measured == "Ability", D$ability_score, D$benevolence_score)     # 1-7
+D$trustworthiness_3pt <- ifelse(D$measured == "Ability", D$ability_3pt, D$benevolence_3pt)         # 1-3
 
 # Behavioural trust: did the participant follow the agent's recommendation? (1 = yes)
-qn <- num(D$question_no)
-D$recommended <- recommended(as.character(D$task), qn)
+D$recommended <- recommended(as.character(D$task), num(D$question_no))
 D$chosen      <- chosen(as.character(D$task), D$choice)
 D$followed    <- as.integer(D$chosen == D$recommended)
 
 # Behavioural trust index per participant: proportion of recommendations followed (overall and per task)
-ti <- aggregate(followed ~ session_id, D, mean)
-P$trust_index <- ti$followed[match(P$session_id, ti$session_id)]
+ti <- aggregate(followed ~ session_id, D, mean); P$trust_index <- ti$followed[match(P$session_id, ti$session_id)]
 for (tk in levels(D$task)) { t0 <- aggregate(followed ~ session_id, D[D$task == tk, ], mean); P[[paste0("trust_index_", tk)]] <- t0$followed[match(P$session_id, t0$session_id)] }
-write.csv(P, file.path(OUT, "data_participants.csv"), row.names = FALSE)   # rewritten with the trust index
+write.csv(P, file.path(OUT, "data_participants.csv"), row.names = FALSE)
 
-# Participant moderators merged into the trial data (centred)
+# Participant moderators merged into the video data (centred)
 mods <- intersect(c("stereotype_index", "attitude_ai"), names(P))
 for (m0 in mods) D[[m0]] <- as.numeric(scale(P[[m0]][match(D$session_id, P$session_id)], scale = FALSE))
-
 write.csv(D, file.path(OUT, "data_trials.csv"), row.names = FALSE)
 
-title("2. DATA")
+title("3. DATA")
 say("Rows (participant x video, attention checks removed): ", nrow(D), " | participants: ", nlevels(droplevels(D$participant)), " | videos: ", nlevels(droplevels(D$video)))
-show(table(task = D$task, level = D$level))
+say("Which dimension was rated after which task (found from the data):"); show(table(study = D$study, task = D$task, rated = D$measured, useNA = "ifany"))
+show(table(study = D$study, level = D$level))
 say("Videos per participant: ", paste(range(table(droplevels(D$participant))), collapse = " to "))
 
 # Reliability of the two-item scores: inter-item correlation and Spearman-Brown coefficient
 rel <- function(x, y) { ok <- complete.cases(x, y); if (sum(ok) < 3) return("not enough data"); r <- cor(x[ok], y[ok]); sprintf("r = %.2f, Spearman-Brown = %.2f", r, 2 * r / (1 + r)) }
-say("Ability score (QA, 2 items): ", rel(D$abil_1, D$abil_2), " | benevolence score (Nav, 2 items): ", rel(D$bene_1, D$bene_2))
-say("Correlation of the 3-point item with the 2-item score: ability ", round(cor(D$ability_3pt, D$ability_score, use = "complete.obs"), 2),
-    " | benevolence ", round(cor(D$benevolence_3pt, D$benevolence_score, use = "complete.obs"), 2))
+say("Ability score (2 items): ", rel(D$abil_1, D$abil_2), " | benevolence score (2 items): ", rel(D$bene_1, D$bene_2))
+cr <- function(a, b) { ok <- complete.cases(a, b); if (sum(ok) < 3) NA else round(cor(a[ok], b[ok]), 2) }
+say("Correlation of the 3-point item with the 2-item score: ability ", cr(D$ability_3pt, D$ability_score), " | benevolence ", cr(D$benevolence_3pt, D$benevolence_score))
 say("Recommendations followed (behavioural trust): ", round(mean(D$followed, na.rm = TRUE), 3), " overall | ",
     paste(sprintf("%s %.3f", levels(D$task), tapply(D$followed, D$task, mean, na.rm = TRUE)), collapse = " | "))
 qs <- P[!P$excluded, ]
 if (nrow(qs) > 1) {
-  title("3. PARTICIPANT QUESTIONNAIRES (kept participants)")
+  title("3b. PARTICIPANT QUESTIONNAIRES (kept participants)")
   show(round(t(sapply(qs[, grep("^(agency|communion|stereotype|attitude|bfi|self_attention|trust_index)", names(qs))], function(x) c(mean = mean(x, na.rm = TRUE), sd = sd(x, na.rm = TRUE)))), 2))
   # Does the behavioural trust index agree with reported trust in the advice?
   rt <- aggregate(trust ~ session_id, D, mean); qs$advice_trust <- rt$trust[match(qs$session_id, rt$session_id)]
@@ -234,15 +219,15 @@ DVS <- c(trustworthiness = "Perceived trustworthiness, 2-item score (ability on 
          trust = "Trust in the agent's advice (1-7)", self_confidence = "Confidence in own answer (1-7)")
 for (dv in names(DVS)) {
   say("\n--- ", DVS[[dv]])
-  for (by in list("level", "model", c("task", "level"), c("dimension", "level"), c("agent_gender", "transcript_gender"))) show(pm(dv, by))
+  for (by in list("level", "model", c("study", "level"), c("task", "level"), c("dimension", "level"), c("agent_gender", "transcript_gender"))) show(pm(dv, by))
 }
 
 save_plot <- function(p, name, w = 8, h = 5) suppressMessages(ggsave(file.path(OUT, name), p, width = w, height = h, dpi = 150))
 for (dv in names(DVS)) {
-  p1 <- pm(dv, c("task", "dimension", "level", "model"))
+  p1 <- pm(dv, c("study", "task", "dimension", "level", "model"))
   if (nrow(p1)) save_plot(ggplot(p1, aes(level, mean, colour = model, group = model)) + geom_point(position = position_dodge(.3)) +
       geom_line(position = position_dodge(.3)) + geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = .15, position = position_dodge(.3)) +
-      facet_grid(task ~ dimension) + labs(x = "Level", y = DVS[[dv]], colour = "Model") + theme_minimal(), paste0("fig_", dv, "_level_model.png"))
+      facet_grid(study + task ~ dimension) + labs(x = "Level", y = DVS[[dv]], colour = "Model") + theme_minimal(), paste0("fig_", dv, "_level_model.png"), 9, 3 + 2 * nlevels(D$study))
   p2 <- pm(dv, c("agent_gender", "transcript_gender"))
   if (nrow(p2)) save_plot(ggplot(p2, aes(transcript_gender, mean, colour = agent_gender, group = agent_gender)) + geom_point(position = position_dodge(.3)) +
       geom_line(position = position_dodge(.3)) + geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = .15, position = position_dodge(.3)) +
@@ -256,13 +241,20 @@ for (dv in names(DVS)) {
 # - type III F tests with Satterthwaite df (lmerTest), sum-to-zero contrasts
 # - random intercepts for participants AND videos (each video is a sampled stimulus); add random slopes if the design allows
 # - pairwise comparisons (Tukey) with emmeans for the main factors
+# Drops terms that add no information given the previous ones (e.g. task and study when, for one dimension, each study
+# used a single task): they cannot be estimated separately, so the report says which term was dropped.
+drop_aliased <- function(terms, d) {
+  keep <- character(0); rk <- 1
+  for (t0 in terms) { r1 <- qr(model.matrix(as.formula(paste("~", paste(c(keep, t0), collapse = " + "))), d))$rank
+    if (r1 > rk) { keep <- c(keep, t0); rk <- r1 } else say("Term dropped (confounded with the terms before it in this subset): ", t0) }
+  keep
+}
 fit_lmm <- function(dv, data, fixed, label) {
   title(paste0("5. MIXED MODEL: ", label))
   d <- data[!is.na(data[[dv]]), ]
   d <- droplevels(d)
   varies <- function(x) if (is.numeric(d[[x]])) isTRUE(var(d[[x]], na.rm = TRUE) > 0) else nlevels(d[[x]]) > 1
-  keep <- function(f) f[vapply(f, function(v) all(vapply(strsplit(v, ":")[[1]], varies, TRUE)), TRUE)]
-  terms <- keep(fixed)
+  terms <- drop_aliased(fixed[vapply(fixed, function(v) all(vapply(strsplit(v, ":")[[1]], varies, TRUE)), TRUE)], d)
   if (!length(terms) || nlevels(d$participant) < 3) { say("Not enough data for this model (need >= 3 participants and variation in the factors)."); return(invisible(NULL)) }
   f <- as.formula(paste(dv, "~", paste(terms, collapse = " + "), "+ (1 | participant) + (1 | video)"))
   say("Formula: ", deparse(f, width.cutoff = 500))
@@ -272,7 +264,7 @@ fit_lmm <- function(dv, data, fixed, label) {
   say("N observations = ", nobs(m), " | participants = ", nlevels(d$participant), " | videos = ", nlevels(d$video))
   show(anova(m, type = 3))
   say("Random effects:"); show(as.data.frame(VarCorr(m))[, c("grp", "vcov", "sdcor")])
-  for (f0 in intersect(c("level", "model", "dimension", "agent_gender", "transcript_gender", "task"), all.vars(f))) {
+  for (f0 in intersect(c("level", "model", "dimension", "agent_gender", "transcript_gender", "task", "study"), terms)) {
     e <- emmeans(m, as.formula(paste("~", f0)))
     say("Estimated marginal means: ", f0); show(summary(e))
     if (nlevels(d[[f0]]) > 2) show(pairs(e, adjust = "tukey"))
@@ -283,11 +275,11 @@ fit_lmm <- function(dv, data, fixed, label) {
   }
   invisible(m)
 }
-FIXED_BOTH <- c("level", "dimension", "model", "agent_gender", "transcript_gender", "task", "level:dimension", "level:model", "agent_gender:transcript_gender")
-FIXED_ONE  <- setdiff(FIXED_BOTH, "task")
-m_tw    <- fit_lmm("trustworthiness", D, FIXED_BOTH, "perceived trustworthiness, 2-item score (1-7), both tasks")
-m_abil  <- fit_lmm("ability_score", D[D$task == "QA", ], FIXED_ONE, "perceived ability, 2-item score (1-7), QA videos")
-m_bene  <- fit_lmm("benevolence_score", D[D$task == "Nav", ], FIXED_ONE, "perceived benevolence, 2-item score (1-7), Nav videos")
+FIXED_BOTH <- c("level", "dimension", "model", "agent_gender", "transcript_gender", "task", "study", "task:study", "level:dimension", "level:model", "agent_gender:transcript_gender")
+FIXED_ONE  <- FIXED_BOTH   # terms that do not vary in a subset (e.g. task within one task) are dropped automatically
+m_tw    <- fit_lmm("trustworthiness", D, FIXED_BOTH, "perceived trustworthiness, 2-item score (1-7), ability and benevolence ratings together")
+m_abil  <- fit_lmm("ability_score", D, FIXED_ONE, "perceived ability, 2-item score (1-7), videos rated on ability")
+m_bene  <- fit_lmm("benevolence_score", D, FIXED_ONE, "perceived benevolence, 2-item score (1-7), videos rated on benevolence")
 m_trust <- fit_lmm("trust", D, FIXED_BOTH, "trust in the agent's advice (1-7)")
 m_conf  <- fit_lmm("self_confidence", D, FIXED_BOTH, "confidence in own answer (1-7)")
 
@@ -302,7 +294,7 @@ fit_other <- function(dv, data, fixed, label, kind) {
   title(paste0("6. ", label))
   d <- droplevels(data[!is.na(data[[dv]]), ])
   varies <- function(x) if (is.numeric(d[[x]])) isTRUE(var(d[[x]], na.rm = TRUE) > 0) else nlevels(d[[x]]) > 1
-  terms <- fixed[vapply(fixed, function(v) all(vapply(strsplit(v, ":")[[1]], varies, TRUE)), TRUE)]
+  terms <- drop_aliased(fixed[vapply(fixed, function(v) all(vapply(strsplit(v, ":")[[1]], varies, TRUE)), TRUE)], d)
   if (!length(terms) || nlevels(d$participant) < 3) { say("Not enough data for this model (need >= 3 participants and variation in the factors)."); return(invisible(NULL)) }
   if (kind == "ordinal") d[[dv]] <- factor(d[[dv]], ordered = TRUE)
   f <- as.formula(paste(dv, "~", paste(terms, collapse = " + "), "+ (1 | participant) + (1 | video)"))
@@ -312,16 +304,16 @@ fit_other <- function(dv, data, fixed, label, kind) {
   if (is.null(m)) return(invisible(NULL))
   say("N observations = ", nrow(d), " | participants = ", nlevels(d$participant), " | videos = ", nlevels(d$video))
   show(joint_tests(m))
-  for (f0 in intersect(c("level", "model", "dimension", "agent_gender", "transcript_gender", "task"), terms)) {
+  for (f0 in intersect(c("level", "model", "dimension", "agent_gender", "transcript_gender", "task", "study"), terms)) {
     e <- emmeans(m, as.formula(paste("~", f0)), type = "response", mode = if (kind == "ordinal") "mean.class" else NULL)
     say(if (kind == "ordinal") "Estimated mean response (1-3): " else "Estimated probability of following: ", f0); show(summary(e))
     if (nlevels(d[[f0]]) > 2) show(pairs(e, adjust = "tukey"))
   }
   invisible(m)
 }
-fit_other("trustworthiness_3pt", D, FIXED_BOTH, "3-POINT ITEM (ability on QA, benevolence on Nav): ordinal mixed model", "ordinal")
-fit_other("ability_3pt", D[D$task == "QA", ], FIXED_ONE, "3-POINT ABILITY ITEM, QA videos: ordinal mixed model", "ordinal")
-fit_other("benevolence_3pt", D[D$task == "Nav", ], FIXED_ONE, "3-POINT BENEVOLENCE ITEM, Nav videos: ordinal mixed model", "ordinal")
+fit_other("trustworthiness_3pt", D, FIXED_BOTH, "3-POINT ITEM (ability or benevolence, as rated): ordinal mixed model", "ordinal")
+fit_other("ability_3pt", D, FIXED_ONE, "3-POINT ABILITY ITEM: ordinal mixed model", "ordinal")
+fit_other("benevolence_3pt", D, FIXED_ONE, "3-POINT BENEVOLENCE ITEM: ordinal mixed model", "ordinal")
 fit_other("followed", D, FIXED_BOTH, "FOLLOWING THE AGENT'S RECOMMENDATION (behavioural trust): logistic mixed model", "binomial")
 for (tk in levels(D$task)) fit_other("followed", D[D$task == tk, ], FIXED_ONE, paste0("FOLLOWING THE AGENT'S RECOMMENDATION, ", tk, " videos: logistic mixed model"), "binomial")
 

@@ -78,7 +78,10 @@ mais n'est pas fiable (faux positifs gonflés, voir plus haut). Résultats : `po
 
 # Analyse des résultats (`analyse_results.R`)
 
-`Rscript analysis/analyse_results.R export.csv [dossier]` : lit l'export CSV de l'admin, applique les exclusions
+`Rscript analysis/analyse_results.R exportS1.csv exportS2.csv [dossier]` : lit un ou plusieurs exports CSV de l'admin (une étude par fichier, étiquette S1/S2 tirée du nom), les combine, applique les exclusions
 (réglages en tête du script), calcule les scores (capacité, bienveillance, confiance, questionnaires) et ajuste les modèles
 mixtes `vd ~ niveau * dimension + niveau * modèle + genre agent * genre transcript + tâche + (1 | participant) + (1 | vidéo)`.
 Sorties dans `analysis/results/` (ignoré par git, car il contient des données de participants).
+
+Données factices pour tester : `analysis/test_data/fake_exportS1.csv` et `fake_exportS2.csv` (80 participants chacun, générés par
+`make_fake_export.R` à partir des en-têtes des vrais exports ; 5 participants à exclure par fichier + 1 participant présent dans les deux études).
