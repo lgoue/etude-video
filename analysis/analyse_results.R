@@ -6,6 +6,8 @@
 #            report.txt              all tests and tables, in reading order
 #            data_trials.csv         clean data, one row per participant x video (scores computed)
 #            data_participants.csv   one row per participant (questionnaire scores, exclusion flags)
+#            data_videos.csv         one row per video: its ability rating and its benevolence rating side by side
+#            data_transcripts_agent_gender.csv  same transcript, female vs male agent
 #            *.png                   figures
 # Packages: lme4, lmerTest, emmeans, afex, ggplot2, ordinal
 #
@@ -117,7 +119,7 @@ read_export <- function(file, study) {
   D <- data.frame(
     study = study, participant = paste0(study, "_", r$participant), session_id = r$session_id, video = r$video_name, pos = num(r$pos), part = r$part,
     task = r$task, dimension = r$dimension, level = r$ability, model = r$model, agent_gender = r$gender, transcript_gender = r$transcript,
-    question_no = r$question_no,
+    question_no = r$question_no, transcript_no = r$transcript_no,
     abil_1 = pick("confident about the virtual character's knowledge", r), abil_2 = pick("very capable of indicating", r), ability_3pt = pick("assess the character.s ability", r),
     bene_1 = pick("go out of its way to help", r), bene_2 = pick("needs and desires are very important", r), benevolence_3pt = pick("evaluate the character.s benevolence", r),
     trust = pick("confident in the virtual character's advice", r),
@@ -332,6 +334,104 @@ for (spec in list(list(dv = "trustworthiness", w = c("level", "model")), list(dv
   a <- suppressMessages(aov_ez("participant", spec$dv, d, within = spec$w, fun_aggregate = mean, anova_table = list(correction = "GG", es = "pes")))
   show(a)
 }
+
+
+# =====================================================================================================
+# 8. ABILITY AND BENEVOLENCE RATINGS OF EACH VIDEO
+# =====================================================================================================
+# Each video is rated on ability in one study and on benevolence in the other (S1: ability after QA, benevolence after Nav;
+# S2: the reverse), always with the two 7-point items. Here the two ratings are put side by side, one row per video.
+title("8. ABILITY AND BENEVOLENCE RATINGS OF EACH VIDEO (2-item 7-point scores)")
+vkey <- c("video", "task", "dimension", "level", "model", "agent_gender", "transcript_gender", "transcript_no")
+vmean <- function(dv) { d <- D[!is.na(D[[dv]]), ]; if (!nrow(d)) return(NULL)
+  a <- aggregate(d[[dv]], d[vkey], function(x) c(n = length(x), mean = mean(x), sd = sd(x))); cbind(a[vkey], setNames(as.data.frame(a$x), paste0(dv, c("_n", "_mean", "_sd")))) }
+V <- Reduce(function(a, b) if (is.null(b)) a else merge(a, b, all = TRUE), lapply(c("ability_score", "benevolence_score", "ability_3pt", "benevolence_3pt", "trust", "followed"), vmean))
+for (s0 in STUDIES) { st <- unique(D[D$study == s0, c("video", "measured")]); V[[paste0("rated_in_", s0)]] <- st$measured[match(V$video, st$video)] }
+write.csv(V, file.path(OUT, "data_videos.csv"), row.names = FALSE)
+both <- complete.cases(V$ability_score_mean, V$benevolence_score_mean)
+say("Videos: ", nrow(V), " | rated on ability: ", sum(!is.na(V$ability_score_mean)), " | on benevolence: ", sum(!is.na(V$benevolence_score_mean)), " | on both: ", sum(both))
+say("Ratings per video: ability ", paste(range(V$ability_score_n, na.rm = TRUE), collapse = "-"), " | benevolence ", paste(range(V$benevolence_score_n, na.rm = TRUE), collapse = "-"))
+if (sum(both) > 3) {
+  say("Correlation between a video's ability and benevolence ratings (videos rated on both):"); show(cor.test(V$ability_score_mean[both], V$benevolence_score_mean[both]))
+  save_plot(ggplot(V[both, ], aes(ability_score_mean, benevolence_score_mean, colour = level, shape = dimension)) + geom_point(alpha = .8) +
+    geom_abline(linetype = 2, colour = "grey60") + facet_wrap(~ task) + coord_equal(xlim = c(1, 7), ylim = c(1, 7)) +
+    labs(x = "Mean ability rating (1-7)", y = "Mean benevolence rating (1-7)", colour = "Level", shape = "Dimension manipulated") + theme_minimal(),
+    "fig_videos_ability_vs_benevolence.png", 9, 5)
+}
+say("\nMean ability and benevolence ratings by manipulated dimension and level (means of video means):")
+show(aggregate(cbind(ability = ability_score_mean, benevolence = benevolence_score_mean) ~ dimension + level, V, function(x) round(mean(x, na.rm = TRUE), 2), na.action = na.pass))
+
+# Manipulation check: the level of a video should move the rating of the dimension it manipulates.
+# One model with both ratings: rating ~ rated dimension x manipulated dimension x level (+ other factors).
+title("8b. MANIPULATION CHECK: rated dimension x manipulated dimension x level (mixed model)")
+DL <- D[!is.na(D$trustworthiness), ]; DL$rated <- DL$measured
+mc <- tryCatch(lmer(trustworthiness ~ rated * dimension * level + model + agent_gender * transcript_gender + task + (1 | participant) + (1 | video), data = DL),
+               error = function(e) { say("Model failed: ", conditionMessage(e)); NULL })
+if (!is.null(mc) && nlevels(droplevels(DL$participant)) >= 3) {
+  say("N observations = ", nobs(mc)); show(anova(mc, type = 3))
+  say("Effect of level within each rated x manipulated dimension:"); show(pairs(emmeans(mc, ~ level | rated * dimension), adjust = "tukey"))
+} else say("Not enough data for this model.")
+
+# =====================================================================================================
+# 9. SAME TRANSCRIPT, DIFFERENT AGENT GENDER
+# =====================================================================================================
+# Videos with the same transcript_no say the same thing; only the agent (female / male) differs. For each rating, compare the
+# two versions of each transcript: paired tests across transcripts, then a mixed model where transcript is a random effect
+# (so the agent-gender effect is estimated within transcripts) with a random agent-gender slope (does the gender effect
+# differ from one transcript to another?).
+title("9. SAME TRANSCRIPT, FEMALE vs MALE AGENT")
+GEN <- levels(D$agent_gender)
+if (length(GEN) == 2 && any(!is.na(D$transcript_no) & D$transcript_no != "")) {
+  pairs_out <- list()
+  for (dv in c(ability = "ability_score", benevolence = "benevolence_score", advice_trust = "trust", followed = "followed")) {
+    d <- D[!is.na(D[[dv]]) & !is.na(D$transcript_no) & D$transcript_no != "", ]
+    if (!nrow(d)) next
+    lab <- names(which(c(ability = "ability_score", benevolence = "benevolence_score", advice_trust = "trust", followed = "followed") == dv))
+    say("\n--- ", lab, " (", dv, ")")
+    m <- aggregate(d[[dv]], list(transcript_no = d$transcript_no, agent_gender = d$agent_gender), function(x) c(n = length(x), mean = mean(x)))
+    m <- cbind(m[1:2], as.data.frame(m$x))
+    w <- reshape(m, idvar = "transcript_no", timevar = "agent_gender", direction = "wide")
+    g1 <- paste0("mean.", GEN[1]); g2 <- paste0("mean.", GEN[2])
+    w <- w[complete.cases(w[[g1]], w[[g2]]), ]
+    if (nrow(w) < 3) { say("Fewer than 3 transcripts seen with both agent genders: skipped."); next }
+    info <- unique(d[, c("transcript_no", "task", "transcript_gender", "level", "dimension")]); info <- info[!duplicated(info$transcript_no), ]
+    w <- merge(info, w); w$difference <- w[[g1]] - w[[g2]]; w$rating <- lab
+    pairs_out[[lab]] <- w
+    say(nrow(w), " transcripts seen with both a ", GEN[1], " and a ", GEN[2], " agent. Mean difference ", GEN[1], " - ", GEN[2], " = ", round(mean(w$difference), 3),
+        " (SD across transcripts ", round(sd(w$difference), 3), ")")
+    show(t.test(w[[g1]], w[[g2]], paired = TRUE)); show(suppressWarnings(wilcox.test(w[[g1]], w[[g2]], paired = TRUE)))
+    say("Difference by transcript gender (mean, n transcripts):"); show(aggregate(difference ~ transcript_gender, w, function(x) round(c(mean = mean(x), n = length(x)), 3)))
+    say("Transcripts with the largest differences:"); show(head(w[order(-abs(w$difference)), c("transcript_no", "task", "transcript_gender", "level", g1, g2, "difference")], 10))
+    # Mixed model within transcripts (agent gender coded -0.5 / +0.5 for the random slope)
+    d$ag <- ifelse(d$agent_gender == GEN[1], .5, -.5)
+    fam <- if (dv == "followed") binomial else NULL
+    fit <- function(f) tryCatch(suppressMessages(if (is.null(fam)) lmer(f, data = d, REML = FALSE) else glmer(f, data = d, family = fam, control = glmerControl(optimizer = "bobyqa"))),
+                                error = function(e) NULL)
+    f0 <- as.formula(paste(dv, "~ ag * transcript_gender + level + (1 | participant) + (1 | transcript_no) + (1 | video)"))
+    f1 <- as.formula(paste(dv, "~ ag * transcript_gender + level + (1 | participant) + (1 + ag || transcript_no) + (1 | video)"))
+    m0 <- fit(f0); m1 <- fit(f1)
+    if (!is.null(m0) && nlevels(droplevels(d$participant)) >= 3) {
+      say("Mixed model (agent gender within transcript; ag = ", GEN[1], " minus ", GEN[2], "): ", deparse(f0, width.cutoff = 500))
+      show(round(coef(summary(m0)), 4))
+      if (!is.null(m1)) { say("Does the agent-gender effect vary across transcripts? (random slope of ag by transcript, likelihood-ratio test)")
+        show(anova(m0, m1)); show(as.data.frame(VarCorr(m1))[, c("grp", "var1", "sdcor")]) }
+    }
+  }
+  if (length(pairs_out)) {
+    PO <- do.call(rbind, lapply(pairs_out, function(w) { names(w) <- sub(paste0("^(n|mean)\\.(", paste(GEN, collapse = "|"), ")$"), "\\1_\\2", names(w)); w }))
+    write.csv(PO, file.path(OUT, "data_transcripts_agent_gender.csv"), row.names = FALSE)
+    pl <- do.call(rbind, lapply(pairs_out, function(w) rbind(data.frame(rating = w$rating, transcript_no = w$transcript_no, agent_gender = GEN[1], mean = w[[paste0("mean.", GEN[1])]], diff = w$difference),
+                                                         data.frame(rating = w$rating, transcript_no = w$transcript_no, agent_gender = GEN[2], mean = w[[paste0("mean.", GEN[2])]], diff = w$difference))))
+    pl$transcript_no <- reorder(factor(paste(pl$rating, pl$transcript_no)), pl$diff)
+    pl <- pl[pl$rating %in% c("ability", "benevolence"), ]
+    top <- unlist(lapply(split(pl, pl$rating), function(x) head(unique(as.character(x$transcript_no[order(-abs(x$diff))])), 40)))   # 40 largest gaps per rating
+    pl <- droplevels(pl[as.character(pl$transcript_no) %in% top, ])
+    if (nrow(pl)) save_plot(ggplot(pl, aes(mean, transcript_no, colour = agent_gender)) + geom_line(aes(group = transcript_no), colour = "grey70") + geom_point() +
+      facet_wrap(~ rating, scales = "free_y") + scale_y_discrete(labels = function(x) sub("^\\S+ ", "", x)) +
+      labs(x = "Mean rating (1-7)", y = "Transcript (40 largest differences, sorted)", colour = "Agent gender") + theme_minimal() + theme(axis.text.y = element_text(size = 5)),
+      "fig_transcripts_agent_gender.png", 9, 8)
+  }
+} else say("No transcript_no in the data, or agent gender does not have exactly two levels: skipped.")
 
 say("\nDone. Results in ", normalizePath(OUT))
 close(REPORT)

@@ -31,7 +31,13 @@ pool <- expand.grid(rep = 1:3, transcript = c("Femme", "Homme", "Neutre"), gende
                     ability = c("Low", "Medium", "High"), dimension = c("Ability", "Benevolence"), task = c("QA", "Nav"), stringsAsFactors = FALSE)
 pool$video_name <- with(pool, paste0(substr(dimension, 1, 1), "_", substr(ability, 1, 3), "_", task, "_Transcript", substr(transcript, 1, 1),
                                      "_Agent", substr(gender, 1, 1), "_", substr(model, 1, 2), "_", rep))
+# Same videos (and same video effects) in every fake study: the pool uses its own fixed seed
+seed_participants <- .Random.seed; set.seed(7)
+pool$transcript_no <- as.integer(factor(with(pool, paste(rep, transcript, model, ability, dimension, task))))   # F and M versions share a transcript
 pool$w <- rnorm(nrow(pool), 0, .4)                                   # video-to-video variability
+tr_gender <- rnorm(max(pool$transcript_no), 0, .3)                   # gender effect that differs between transcripts
+pool$w <- pool$w + ifelse(pool$gender == "Femme", .5, -.5) * tr_gender[pool$transcript_no]
+.Random.seed <- seed_participants
 lvl <- c(Low = -1, Medium = 0, High = 1)
 
 clip <- function(x, k) as.character(pmin(k, pmax(1, round(x))))
@@ -44,6 +50,7 @@ for (p in seq_len(N)) {
   r$participant <- as.character(p); r$prolific_pid <- sprintf("%s%06d", PREFIX, p); r$session_id <- sprintf("fake-%s-%04d", tolower(PREFIX), p)
   r$pos <- as.character(seq_len(n) - 1); r$part <- ifelse(is_qa, "1", "2")
   for (k in c("video_name", "ability", "gender", "task", "transcript", "model", "dimension")) r[[k]] <- v[[k]]
+  r$transcript_no <- as.character(v$transcript_no)
   r$yt <- paste0("https://example.org/", v$video_name, ".mp4")
   r$question_no <- as.character(ifelse(is_qa, sample(0:121, n, TRUE), sample(0:3, n, TRUE)))
   r$attention <- "false"; r$ended <- "true"; r$audio_ok <- "true"; r$comp_attempts <- as.character(sample(1:2, 1, prob = c(.8, .2)))
