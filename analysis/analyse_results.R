@@ -322,10 +322,55 @@ fit_other <- function(dv, data, fixed, label, kind) {
   invisible(m)
 }
 fit_other("trustworthiness_3pt", D, FIXED_BOTH, "3-POINT ITEM (ability or benevolence, as rated): ordinal mixed model", "ordinal")
-fit_other("ability_3pt", D, FIXED_ONE, "3-POINT ABILITY ITEM: ordinal mixed model", "ordinal")
-fit_other("benevolence_3pt", D, FIXED_ONE, "3-POINT BENEVOLENCE ITEM: ordinal mixed model", "ordinal")
-fit_other("followed", D, FIXED_BOTH, "FOLLOWING THE AGENT'S RECOMMENDATION (behavioural trust): logistic mixed model", "binomial")
+m_ab3 <- fit_other("ability_3pt", D, FIXED_ONE, "3-POINT ABILITY ITEM: ordinal mixed model", "ordinal")
+m_be3 <- fit_other("benevolence_3pt", D, FIXED_ONE, "3-POINT BENEVOLENCE ITEM: ordinal mixed model", "ordinal")
+m_fol <- fit_other("followed", D, FIXED_BOTH, "FOLLOWING THE AGENT'S RECOMMENDATION (behavioural trust): logistic mixed model", "binomial")
 for (tk in levels(D$task)) fit_other("followed", D[D$task == tk, ], FIXED_ONE, paste0("FOLLOWING THE AGENT'S RECOMMENDATION, ", tk, " videos: logistic mixed model"), "binomial")
+
+# -----------------------------------------------------------------------------------------------------
+# Figures redrawn with the significant differences from the mixed models above
+#   level x model figures: stars between two levels = that step (Low-Medium, Medium-High) is significant in the panel,
+#                          averaged over models (Tukey-adjusted); gender figures: stars = female vs male agent differs
+#                          within that transcript gender. * p < .05, ** p < .01, *** p < .001
+# -----------------------------------------------------------------------------------------------------
+stars <- function(p) ifelse(is.na(p), "", ifelse(p < .001, "***", ifelse(p < .01, "**", ifelse(p < .05, "*", ""))))
+emm <- function(m, spec) { if (is.null(m)) return(NULL); tryCatch(if (inherits(m, "clmm")) emmeans(m, spec, mode = "mean.class") else emmeans(m, spec), error = function(e) NULL) }
+CAPTION <- "* p < .05, ** p < .01, *** p < .001 (mixed model, Tukey-adjusted)"
+MODELS <- list(ability_score = m_abil, benevolence_score = m_bene, ability_3pt = m_ab3, benevolence_3pt = m_be3, followed = m_fol, trust = m_trust, self_confidence = m_conf)
+for (dv in intersect(names(DVS), names(MODELS))) {
+  m <- MODELS[[dv]]
+  # Level x model, with significant level steps in each task x manipulated-dimension panel
+  p1 <- pm(dv, c("task", "dimension", "level", "model"))
+  if (nrow(p1)) {
+    by <- intersect(c("dimension", "task"), all.vars(formula(m)))
+    e <- emm(m, as.formula(paste("~ level", if (length(by)) paste("|", paste(by, collapse = " * ")) else "")))
+    lab <- NULL
+    if (!is.null(e)) {
+      ct <- as.data.frame(pairs(e, adjust = "tukey")); ct <- ct[ct$contrast %in% c("Low - Medium", "Medium - High"), ]
+      top <- aggregate(cbind(y = mean + ifelse(is.na(se), 0, se)) ~ task + dimension, p1, max)
+      lab <- merge(top, ct[, intersect(c(by, "contrast", "p.value"), names(ct)), drop = FALSE], by = intersect(by, c("task", "dimension")), all = length(by) == 0)
+      lab$level_x <- ifelse(lab$contrast == "Low - Medium", 1.5, 2.5); lab$s <- stars(lab$p.value); lab <- lab[lab$s != "", ]
+    }
+    g <- ggplot(p1, aes(level, mean, colour = model, group = model)) + geom_point(position = position_dodge(.3)) +
+      geom_line(position = position_dodge(.3)) + geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = .15, position = position_dodge(.3)) +
+      facet_grid(task ~ dimension, labeller = labeller(dimension = function(x) paste(x, "manipulated"))) +
+      labs(x = "Level", y = DVS[[dv]], colour = "Model", caption = paste0("Stars between levels: significant level step (averaged over models).\n", CAPTION)) + theme_minimal()
+    if (!is.null(lab) && nrow(lab)) g <- g + geom_text(data = lab, aes(x = level_x, y = y, label = s), inherit.aes = FALSE, vjust = -0.2, size = 5)
+    save_plot(g + scale_y_continuous(expand = expansion(mult = c(.05, .15))), paste0("fig_", dv, "_level_model.png"), 9, 6)
+  }
+  # Agent gender x transcript gender, with significant female-male differences
+  p2 <- pm(dv, c("agent_gender", "transcript_gender"))
+  if (nrow(p2)) {
+    e <- emm(m, ~ agent_gender | transcript_gender); lab <- NULL
+    if (!is.null(e)) { ct <- as.data.frame(pairs(e)); top <- aggregate(cbind(y = mean + ifelse(is.na(se), 0, se)) ~ transcript_gender, p2, max)
+      lab <- merge(top, data.frame(transcript_gender = ct$transcript_gender, p = ct$p.value)); lab$s <- stars(lab$p); lab <- lab[lab$s != "", ] }
+    g <- ggplot(p2, aes(transcript_gender, mean, colour = agent_gender, group = agent_gender)) + geom_point(position = position_dodge(.3)) +
+      geom_line(position = position_dodge(.3)) + geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = .15, position = position_dodge(.3)) +
+      labs(x = "Transcript gender", y = DVS[[dv]], colour = "Agent gender", caption = paste0("Stars: female vs male agent differs.\n", CAPTION)) + theme_minimal()
+    if (!is.null(lab) && nrow(lab)) g <- g + geom_text(data = lab, aes(transcript_gender, y, label = s), inherit.aes = FALSE, vjust = -0.2, size = 5)
+    save_plot(g + scale_y_continuous(expand = expansion(mult = c(.05, .15))), paste0("fig_", dv, "_gender.png"), 6, 4.5)
+  }
+}
 
 # =====================================================================================================
 # 7. COMPLEMENTARY REPEATED-MEASURES ANOVA (by-participant means)
@@ -386,21 +431,37 @@ mc <- tryCatch(lmer(trustworthiness ~ rated * dimension * level + model + agent_
 # The off-target panels show e.g. ability ratings when benevolence is manipulated.
 DL$rated_dimension <- factor(paste(DL$rated, "rating"), levels = c("Ability rating", "Benevolence rating"))
 DL$manipulated <- factor(paste(DL$dimension, "manipulated"))
-cross <- pm("trustworthiness", c("manipulated", "level", "rated_dimension"), DL)
-if (nrow(cross)) save_plot(ggplot(cross, aes(level, mean, colour = rated_dimension, group = rated_dimension)) + geom_point(position = position_dodge(.25), size = 2) +
-    geom_line(position = position_dodge(.25)) + geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = .15, position = position_dodge(.25)) +
-    facet_wrap(~ manipulated) + labs(x = "Level of the manipulated dimension", y = "Mean rating (2-item score, 1-7)", colour = NULL) +
-    theme_minimal() + theme(legend.position = "bottom"), "fig_cross_ratings.png", 8, 4.5)
-cross_t <- pm("trustworthiness", c("task", "manipulated", "level", "rated_dimension"), DL)
-if (nrow(cross_t)) save_plot(ggplot(cross_t, aes(level, mean, colour = rated_dimension, group = rated_dimension)) + geom_point(position = position_dodge(.25), size = 2) +
-    geom_line(position = position_dodge(.25)) + geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = .15, position = position_dodge(.25)) +
-    facet_grid(task ~ manipulated) + labs(x = "Level of the manipulated dimension", y = "Mean rating (2-item score, 1-7)", colour = NULL) +
-    theme_minimal() + theme(legend.position = "bottom"), "fig_cross_ratings_by_task.png", 8, 7)
-say("Ratings by manipulated dimension, level and rated dimension (means of participant means; see fig_cross_ratings.png):"); show(cross)
 if (!is.null(mc) && nlevels(droplevels(DL$participant)) >= 3) {
   say("N observations = ", nobs(mc)); show(anova(mc, type = 3))
   say("Effect of level within each rated x manipulated dimension:"); show(pairs(emmeans(mc, ~ level | rated * dimension), adjust = "tukey"))
 } else say("Not enough data for this model.")
+# Significant level steps (Tukey-adjusted) within each rated x manipulated dimension, shown as stars between the points
+cross_lab <- function(cr, by) {
+  e <- if (is.null(mc)) NULL else tryCatch(as.data.frame(pairs(emmeans(mc, as.formula(paste("~ level |", paste(by, collapse = " * ")))), adjust = "tukey")), error = function(e) NULL)
+  if (is.null(e)) return(NULL)
+  e <- e[e$contrast %in% c("Low - Medium", "Medium - High"), ]
+  e$rated_dimension <- paste(e$rated, "rating"); e$manipulated <- paste(e$dimension, "manipulated")
+  e$x <- ifelse(e$contrast == "Low - Medium", 1.5, 2.5); e$s <- stars(e$p.value)
+  lv <- c("Low", "Medium", "High"); keys <- intersect(c("task", "manipulated", "rated_dimension"), names(cr))
+  e$y <- mapply(function(i) { k <- e[i, ]; sel <- Reduce(`&`, lapply(keys, function(kk) as.character(cr[[kk]]) == as.character(k[[kk]])))
+    l2 <- lv[c(1, 2)] ; if (k$contrast == "Medium - High") l2 <- lv[c(2, 3)]; mean(cr$mean[sel & cr$level %in% l2]) }, seq_len(nrow(e)))
+  e[e$s != "", ]
+}
+cross_plot <- function(cr, lab, facet, file, h) {
+  g <- ggplot(cr, aes(level, mean, colour = rated_dimension, group = rated_dimension)) + geom_point(position = position_dodge(.25), size = 2) +
+    geom_line(position = position_dodge(.25)) + geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = .15, position = position_dodge(.25)) +
+    facet + labs(x = "Level of the manipulated dimension", y = "Mean rating (2-item score, 1-7)", colour = NULL,
+                 caption = paste0("Stars between levels: that step is significant for that rating.\n", CAPTION)) + theme_minimal() + theme(legend.position = "bottom")
+  if (!is.null(lab) && nrow(lab)) g <- g + geom_text(data = lab, aes(x = x, y = y, label = s, colour = rated_dimension), inherit.aes = FALSE, vjust = -0.6, size = 5, show.legend = FALSE)
+  save_plot(g, file, 8, h)
+}
+# Figure: each rating (ability, benevolence) by level, for videos manipulating ability and for videos manipulating benevolence.
+# The off-target panels show e.g. ability ratings when benevolence is manipulated.
+cross <- pm("trustworthiness", c("manipulated", "level", "rated_dimension"), DL)
+if (nrow(cross)) cross_plot(cross, cross_lab(cross, c("rated", "dimension")), facet_wrap(~ manipulated), "fig_cross_ratings.png", 4.8)
+cross_t <- pm("trustworthiness", c("task", "manipulated", "level", "rated_dimension"), DL)
+if (nrow(cross_t)) cross_plot(cross_t, NULL, facet_grid(task ~ manipulated), "fig_cross_ratings_by_task.png", 7)
+say("Ratings by manipulated dimension, level and rated dimension (means of participant means; see fig_cross_ratings.png):"); show(cross)
 
 # =====================================================================================================
 # 9. SAME TRANSCRIPT, DIFFERENT AGENT GENDER
@@ -450,6 +511,35 @@ if (length(GEN) == 2 && any(!is.na(D$transcript_no) & D$transcript_no != "")) {
   if (length(pairs_out)) {
     PO <- do.call(rbind, lapply(pairs_out, function(w) { names(w) <- sub(paste0("^(n|mean)\\.(", paste(GEN, collapse = "|"), ")$"), "\\1_\\2", names(w)); w }))
     write.csv(PO, file.path(OUT, "data_transcripts_agent_gender.csv"), row.names = FALSE)
+    # Figure: female - male difference for the same transcript, by level, for ability, benevolence and % of advice taken.
+    # Grey points = transcripts; black = mean difference with 95% CI; stars = difference significantly different from 0
+    # (one-sample t-test across transcripts; Holm correction over the three levels of each measure; "All levels" not corrected).
+    MEAS <- c(ability = "Perceived ability (1-7)", benevolence = "Perceived benevolence (1-7)", followed = "Advice taken (% of choices)")
+    dd <- do.call(rbind, lapply(intersect(names(MEAS), names(pairs_out)), function(k) { w <- pairs_out[[k]]
+      data.frame(measure = MEAS[[k]], transcript_no = w$transcript_no, level = as.character(w$level), diff = w$difference * if (k == "followed") 100 else 1) }))
+    if (!is.null(dd) && nrow(dd)) {
+      dd <- rbind(dd, transform(dd, level = "All levels"))
+      dd$level <- factor(dd$level, levels = c("Low", "Medium", "High", "All levels")); dd$measure <- factor(dd$measure, levels = MEAS)
+      tests <- do.call(rbind, lapply(split(dd, list(dd$measure, dd$level), drop = TRUE), function(x) {
+        if (nrow(x) < 3) return(NULL); t <- t.test(x$diff)
+        data.frame(measure = x$measure[1], level = x$level[1], n_transcripts = nrow(x), mean_diff = mean(x$diff), ci_low = t$conf.int[1], ci_high = t$conf.int[2], t = unname(t$statistic), p = t$p.value) }))
+      rownames(tests) <- NULL; tests$p_adjusted <- tests$p
+      lv3 <- tests$level != "All levels"
+      tests$p_adjusted[lv3] <- ave(tests$p[lv3], tests$measure[lv3], FUN = function(p) p.adjust(p, "holm"))
+      tests$sig <- stars(tests$p_adjusted)
+      say("\nFemale - male difference for the same transcript, by level (", GEN[1], " - ", GEN[2], "; % of advice taken in percentage points):")
+      show(transform(tests, mean_diff = round(mean_diff, 3), ci_low = round(ci_low, 3), ci_high = round(ci_high, 3), t = round(t, 2), p = signif(p, 3), p_adjusted = signif(p_adjusted, 3)))
+      write.csv(tests, file.path(OUT, "tests_transcripts_agent_gender.csv"), row.names = FALSE)
+      tests$y <- ave(dd$diff, dd$measure, FUN = function(x) max(abs(x)))[match(tests$measure, dd$measure)]
+      save_plot(ggplot(dd, aes(level, diff)) + geom_hline(yintercept = 0, linetype = 2, colour = "grey50") +
+        geom_jitter(width = .15, height = 0, alpha = .15, colour = "grey40", size = .8) +
+        geom_pointrange(data = tests, aes(level, mean_diff, ymin = ci_low, ymax = ci_high), inherit.aes = FALSE, size = .4) +
+        geom_text(data = tests, aes(level, y, label = sig), inherit.aes = FALSE, vjust = -0.2, size = 5) +
+        facet_wrap(~ measure, scales = "free_y") + scale_y_continuous(expand = expansion(mult = c(.05, .15))) +
+        labs(x = "Level", y = paste0("Difference ", GEN[1], " - ", GEN[2], " agent (same transcript)"),
+             caption = "Grey: one point per transcript. Black: mean and 95% CI. * p < .05, ** p < .01, *** p < .001 (t-test vs 0, Holm over levels)") +
+        theme_minimal(), "fig_transcripts_gender_difference.png", 10, 4.5)
+    }
     pl <- do.call(rbind, lapply(pairs_out, function(w) rbind(data.frame(rating = w$rating, transcript_no = w$transcript_no, agent_gender = GEN[1], mean = w[[paste0("mean.", GEN[1])]], diff = w$difference),
                                                          data.frame(rating = w$rating, transcript_no = w$transcript_no, agent_gender = GEN[2], mean = w[[paste0("mean.", GEN[2])]], diff = w$difference))))
     pl$transcript_no <- reorder(factor(paste(pl$rating, pl$transcript_no)), pl$diff)
