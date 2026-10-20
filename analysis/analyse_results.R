@@ -6,7 +6,7 @@
 #            data_trials.csv         clean data, one row per participant x video (scores computed)
 #            data_participants.csv   one row per participant (questionnaire scores, exclusion flags)
 #            *.png                   figures
-# Packages: lme4, lmerTest, emmeans, afex, ggplot2
+# Packages: lme4, lmerTest, emmeans, afex, ggplot2, ordinal
 #
 # Design (from the export): each row is one video seen by one participant.
 #   Part 1 = QA videos, rated on ABILITY items; part 2 = Nav videos, rated on BENEVOLENCE items.
@@ -15,7 +15,7 @@
 #   agent gender (Femme/Homme), transcript gender (Femme/Homme/Neutre), task (QA/Nav).
 #   Main analysis: linear mixed models with crossed random intercepts for participants and videos.
 
-suppressMessages({ library(lme4); library(lmerTest); library(emmeans); library(afex); library(ggplot2) })
+suppressMessages({ library(lme4); library(lmerTest); library(emmeans); library(afex); library(ggplot2); library(ordinal) })
 # The export is UTF-8 (curly quotes, "…"): make sure R handles it even if the session locale is not UTF-8
 if (!isTRUE(l10n_info()$`UTF-8`)) for (loc in c("C.UTF-8", "en_US.UTF-8", "fr_FR.UTF-8")) if (nzchar(suppressWarnings(Sys.setlocale("LC_CTYPE", loc)))) break
 options(width = 160, contrasts = c("contr.sum", "contr.poly"))
@@ -34,21 +34,20 @@ EXCLUDE_REJECTED       <- TRUE   # sessions marked "rejected" in the admin
 EXCLUDE_FAILED_TRAPS   <- TRUE   # failed at least one attention-check video
 EXCLUDE_FAILED_INSTRUCTED <- TRUE # wrong answer to an instructed item ("Select 5", "Select 3", "Select 7")
 MAX_COMP_ATTEMPTS      <- Inf    # e.g. 3 to exclude people who needed more than 3 tries at the instructions check
-SELF_ATTENTION_MIN     <- NA     # e.g. 3 to exclude self-reported attention below 3 (check the direction of that scale!)
+SELF_ATTENTION_MIN     <- 2      # self-reported attention: 1 = inattentive, so answers below 2 are excluded (NA = no exclusion)
 
-# Item scales (number of points), used to put items on a common 0-1 scale before averaging
-SCALE_DEFAULT <- 7
-SCALE_3PT_PATTERN <- "How would you (assess|evaluate) the character"   # the two 3-point items
 
 # Stereotype questionnaire: the two blocks of 16 adjectives. Which group did each block ask about?
-STEREO_TARGET_1 <- "women"   # first block (q189-q204)  <- CHECK
-STEREO_TARGET_2 <- "men"     # second block (q206-q221) <- CHECK
+STEREO_TARGET_1 <- "men"     # first block (q189-q204)
+STEREO_TARGET_2 <- "women"   # second block (q206-q221)
 
 # Choice items ("I would answer" / "I would take the"): value 1 or 2 = first or second option shown.
-# To analyse whether participants FOLLOWED the agent, say which answer the agent gave:
-#   QA : "answer1" if the agent always recommends "answer 1" of the QA questions file, "answer2", or NA (unknown)
-#   Nav: NA unless you add a column/rule giving the path recommended by the agent
-QA_AGENT_RECOMMENDS <- NA
+# Behavioural trust = following the agent's recommendation:
+#   QA : the agent recommends answer A when the video's question number is even, B when it is odd
+#   Nav: the agent recommends the Left path when the question number is 0 or 2, Right otherwise
+CHOICE_1 <- c(QA = "A", Nav = "Left")   # what option 1 means for each task (first option shown to participants)
+recommended <- function(task, qn) ifelse(task == "QA", ifelse(qn %% 2 == 0, "A", "B"), ifelse(qn %in% c(0, 2), "Left", "Right"))
+chosen <- function(task, choice) ifelse(choice == 1, CHOICE_1[task], ifelse(task == "QA", ifelse(CHOICE_1["QA"] == "A", "B", "A"), ifelse(CHOICE_1["Nav"] == "Left", "Right", "Left")))
 
 dir.create(OUT, showWarnings = FALSE, recursive = TRUE)
 REPORT <- file(file.path(OUT, "report.txt"), open = "wt")
@@ -87,8 +86,6 @@ ITEMS <- list(
   nav_trust   = col("confident in the virtual character's advice.*q26"),
   nav_selfconf= col("^\\s*I feel confident about my answers")
 )
-scale_of <- function(colname) if (grepl(SCALE_3PT_PATTERN, colname, perl = TRUE)) 3 else SCALE_DEFAULT
-pomp <- function(x, k) (num(x) - 1) / (k - 1)   # 1..k -> 0..1
 
 # =====================================================================================================
 # 2. PARTICIPANT-LEVEL DATA: questionnaires and exclusions
@@ -156,6 +153,7 @@ title("1. PARTICIPANTS AND EXCLUSIONS")
 say("Sessions in the file: ", nrow(P))
 for (f in grep("^excl_", names(P), value = TRUE)) say(sprintf("  %-22s %d", f, sum(P[[f]])))
 say("Participants kept: ", sum(!P$excluded))
+if (!any(!P$excluded)) { say("No participant left after exclusions: nothing to analyse. Check the exclusion settings at the top of the script."); close(REPORT); quit(save = "no") }
 write.csv(P, file.path(OUT, "data_participants.csv"), row.names = FALSE)
 
 # =====================================================================================================
@@ -168,44 +166,56 @@ D <- data.frame(
   task = factor(D$task), dimension = factor(D$dimension), level = factor(D$ability, levels = LEVELS$level),
   model = factor(D$model), agent_gender = factor(D$gender), transcript_gender = factor(D$transcript),
   question_no = D$question_no, qa_answer_a = D$qa_answer_a, qa_answer_b = D$qa_answer_b,
-  ability_items = I(sapply(ITEMS[c("abil_1", "abil_2", "abil_3")], function(c) pomp(D[[c]], scale_of(c)))),
-  benevolence_items = I(sapply(ITEMS[c("bene_1", "bene_2", "bene_3")], function(c) pomp(D[[c]], scale_of(c)))),
+  abil_1 = num(D[[ITEMS$abil_1]]), abil_2 = num(D[[ITEMS$abil_2]]), ability_3pt = num(D[[ITEMS$abil_3]]),
+  bene_1 = num(D[[ITEMS$bene_1]]), bene_2 = num(D[[ITEMS$bene_2]]), benevolence_3pt = num(D[[ITEMS$bene_3]]),
   trust = ifelse(D$task == "QA", num(D[[ITEMS$qa_trust]]), num(D[[ITEMS$nav_trust]])),
   self_confidence = ifelse(D$task == "QA", num(D[[ITEMS$qa_selfconf]]), num(D[[ITEMS$nav_selfconf]])),
   choice = ifelse(D$task == "QA", num(D[[ITEMS$qa_choice]]), num(D[[ITEMS$nav_choice]])),
   stringsAsFactors = FALSE)
-D$ability_index     <- rowMeans(D$ability_items, na.rm = FALSE)       # 0-1 (QA videos)
-D$benevolence_index <- rowMeans(D$benevolence_items, na.rm = FALSE)   # 0-1 (Nav videos)
-# Trustworthiness: the dimension measured for this task (ability on QA, benevolence on Nav), 0-1
-D$trustworthiness <- ifelse(D$task == "QA", D$ability_index, D$benevolence_index)
+# Scores: mean of the two 7-point items (1-7); the 3-point item is analysed separately
+D$ability_score     <- (D$abil_1 + D$abil_2) / 2     # QA videos
+D$benevolence_score <- (D$bene_1 + D$bene_2) / 2     # Nav videos
+# Trustworthiness = the dimension measured for this task (ability on QA, benevolence on Nav)
+D$trustworthiness     <- ifelse(D$task == "QA", D$ability_score, D$benevolence_score)   # 1-7
+D$trustworthiness_3pt <- ifelse(D$task == "QA", D$ability_3pt, D$benevolence_3pt)       # 1-3
 
-# Did the participant follow the agent? (only if the recommended QA answer is known)
-if (!is.na(QA_AGENT_RECOMMENDS)) {
-  qn <- num(D$question_no); a1_is_A <- qn %% 2 == 0                        # answer A = answer 1 when the question number is even
-  chosen_is_1 <- ifelse(D$choice == 1, a1_is_A, !a1_is_A)
-  D$followed <- ifelse(D$task == "QA", as.integer(if (QA_AGENT_RECOMMENDS == "answer1") chosen_is_1 else !chosen_is_1), NA)
-}
+# Behavioural trust: did the participant follow the agent's recommendation? (1 = yes)
+qn <- num(D$question_no)
+D$recommended <- recommended(as.character(D$task), qn)
+D$chosen      <- chosen(as.character(D$task), D$choice)
+D$followed    <- as.integer(D$chosen == D$recommended)
+
+# Behavioural trust index per participant: proportion of recommendations followed (overall and per task)
+ti <- aggregate(followed ~ session_id, D, mean)
+P$trust_index <- ti$followed[match(P$session_id, ti$session_id)]
+for (tk in levels(D$task)) { t0 <- aggregate(followed ~ session_id, D[D$task == tk, ], mean); P[[paste0("trust_index_", tk)]] <- t0$followed[match(P$session_id, t0$session_id)] }
+write.csv(P, file.path(OUT, "data_participants.csv"), row.names = FALSE)   # rewritten with the trust index
 
 # Participant moderators merged into the trial data (centred)
 mods <- intersect(c("stereotype_index", "attitude_ai"), names(P))
 for (m0 in mods) D[[m0]] <- as.numeric(scale(P[[m0]][match(D$session_id, P$session_id)], scale = FALSE))
 
-out_trials <- D; out_trials$ability_items <- NULL; out_trials$benevolence_items <- NULL
-write.csv(out_trials, file.path(OUT, "data_trials.csv"), row.names = FALSE)
+write.csv(D, file.path(OUT, "data_trials.csv"), row.names = FALSE)
 
 title("2. DATA")
 say("Rows (participant x video, attention checks removed): ", nrow(D), " | participants: ", nlevels(droplevels(D$participant)), " | videos: ", nlevels(droplevels(D$video)))
 show(table(task = D$task, level = D$level))
 say("Videos per participant: ", paste(range(table(droplevels(D$participant))), collapse = " to "))
 
-# Reliability of the 3-item indices (items on 0-1 scale)
-alpha <- function(m) { m <- m[complete.cases(m), , drop = FALSE]; k <- ncol(m); if (nrow(m) < 3) return(NA); k / (k - 1) * (1 - sum(apply(m, 2, var)) / var(rowSums(m))) }
-say(sprintf("Cronbach's alpha  ability index (QA): %.2f | benevolence index (Nav): %.2f",
-            alpha(D$ability_items[D$task == "QA", ]), alpha(D$benevolence_items[D$task == "Nav", ])))
+# Reliability of the two-item scores: inter-item correlation and Spearman-Brown coefficient
+rel <- function(x, y) { ok <- complete.cases(x, y); if (sum(ok) < 3) return("not enough data"); r <- cor(x[ok], y[ok]); sprintf("r = %.2f, Spearman-Brown = %.2f", r, 2 * r / (1 + r)) }
+say("Ability score (QA, 2 items): ", rel(D$abil_1, D$abil_2), " | benevolence score (Nav, 2 items): ", rel(D$bene_1, D$bene_2))
+say("Correlation of the 3-point item with the 2-item score: ability ", round(cor(D$ability_3pt, D$ability_score, use = "complete.obs"), 2),
+    " | benevolence ", round(cor(D$benevolence_3pt, D$benevolence_score, use = "complete.obs"), 2))
+say("Recommendations followed (behavioural trust): ", round(mean(D$followed, na.rm = TRUE), 3), " overall | ",
+    paste(sprintf("%s %.3f", levels(D$task), tapply(D$followed, D$task, mean, na.rm = TRUE)), collapse = " | "))
 qs <- P[!P$excluded, ]
 if (nrow(qs) > 1) {
   title("3. PARTICIPANT QUESTIONNAIRES (kept participants)")
-  show(round(t(sapply(qs[, grep("^(agency|communion|stereotype|attitude|bfi|self_attention)", names(qs))], function(x) c(mean = mean(x, na.rm = TRUE), sd = sd(x, na.rm = TRUE)))), 2))
+  show(round(t(sapply(qs[, grep("^(agency|communion|stereotype|attitude|bfi|self_attention|trust_index)", names(qs))], function(x) c(mean = mean(x, na.rm = TRUE), sd = sd(x, na.rm = TRUE)))), 2))
+  # Does the behavioural trust index agree with reported trust in the advice?
+  rt <- aggregate(trust ~ session_id, D, mean); qs$advice_trust <- rt$trust[match(qs$session_id, rt$session_id)]
+  if (sum(complete.cases(qs$trust_index, qs$advice_trust)) > 3) { say("Behavioural trust index vs mean reported advice trust:"); show(cor.test(qs$trust_index, qs$advice_trust)) }
 }
 
 # =====================================================================================================
@@ -218,7 +228,9 @@ pm <- function(dv, by, data = D) {
   s <- aggregate(a$x, a[by], function(x) c(mean = mean(x), se = sd(x) / sqrt(length(x)), n = length(x)))
   cbind(s[by], round(as.data.frame(s$x), 3))
 }
-DVS <- c(trustworthiness = "Perceived trustworthiness (ability on QA, benevolence on Nav), 0-1",
+DVS <- c(trustworthiness = "Perceived trustworthiness, 2-item score (ability on QA, benevolence on Nav), 1-7",
+         trustworthiness_3pt = "Perceived trustworthiness, 3-point item (1-3)",
+         followed = "Recommendation followed (proportion)",
          trust = "Trust in the agent's advice (1-7)", self_confidence = "Confidence in own answer (1-7)")
 for (dv in names(DVS)) {
   say("\n--- ", DVS[[dv]])
@@ -273,9 +285,9 @@ fit_lmm <- function(dv, data, fixed, label) {
 }
 FIXED_BOTH <- c("level", "dimension", "model", "agent_gender", "transcript_gender", "task", "level:dimension", "level:model", "agent_gender:transcript_gender")
 FIXED_ONE  <- setdiff(FIXED_BOTH, "task")
-m_tw    <- fit_lmm("trustworthiness", D, FIXED_BOTH, "perceived trustworthiness (0-1), both tasks")
-m_abil  <- fit_lmm("ability_index", D[D$task == "QA", ], FIXED_ONE, "perceived ability (0-1), QA videos")
-m_bene  <- fit_lmm("benevolence_index", D[D$task == "Nav", ], FIXED_ONE, "perceived benevolence (0-1), Nav videos")
+m_tw    <- fit_lmm("trustworthiness", D, FIXED_BOTH, "perceived trustworthiness, 2-item score (1-7), both tasks")
+m_abil  <- fit_lmm("ability_score", D[D$task == "QA", ], FIXED_ONE, "perceived ability, 2-item score (1-7), QA videos")
+m_bene  <- fit_lmm("benevolence_score", D[D$task == "Nav", ], FIXED_ONE, "perceived benevolence, 2-item score (1-7), Nav videos")
 m_trust <- fit_lmm("trust", D, FIXED_BOTH, "trust in the agent's advice (1-7)")
 m_conf  <- fit_lmm("self_confidence", D, FIXED_BOTH, "confidence in own answer (1-7)")
 
@@ -285,19 +297,33 @@ if (length(mods)) for (dv in c("trustworthiness", "trust")) {
           paste0(dv, " - exploratory moderation by ", paste(mods, collapse = " and ")))
 }
 
-# Following the agent (QA), logistic mixed model
-if ("followed" %in% names(D)) {
-  title("6. FOLLOWING THE AGENT'S ANSWER (QA), logistic mixed model")
-  d <- droplevels(D[D$task == "QA" & !is.na(D$followed), ])
-  say("Proportion following the agent: ", round(mean(d$followed), 3))
-  m <- tryCatch(glmer(followed ~ level * model + agent_gender * transcript_gender + dimension + (1 | participant) + (1 | video), data = d, family = binomial,
-                      control = glmerControl(optimizer = "bobyqa")), error = function(e) { say("Model failed: ", conditionMessage(e)); NULL })
-  if (!is.null(m)) { show(drop1(m, test = "Chisq")); show(summary(emmeans(m, ~ level, type = "response"))) }
-} else {
-  title("6. CHOICES")
-  say("Set QA_AGENT_RECOMMENDS at the top of the script to analyse whether participants followed the agent. Raw choice proportions (option 1):")
-  show(aggregate(cbind(option1 = choice == 1) ~ task + level, D, mean))
+# Models for the 3-point items and for following the agent: same fixed effects, tests with emmeans::joint_tests (Wald, type III)
+fit_other <- function(dv, data, fixed, label, kind) {
+  title(paste0("6. ", label))
+  d <- droplevels(data[!is.na(data[[dv]]), ])
+  varies <- function(x) if (is.numeric(d[[x]])) isTRUE(var(d[[x]], na.rm = TRUE) > 0) else nlevels(d[[x]]) > 1
+  terms <- fixed[vapply(fixed, function(v) all(vapply(strsplit(v, ":")[[1]], varies, TRUE)), TRUE)]
+  if (!length(terms) || nlevels(d$participant) < 3) { say("Not enough data for this model (need >= 3 participants and variation in the factors)."); return(invisible(NULL)) }
+  if (kind == "ordinal") d[[dv]] <- factor(d[[dv]], ordered = TRUE)
+  f <- as.formula(paste(dv, "~", paste(terms, collapse = " + "), "+ (1 | participant) + (1 | video)"))
+  say("Formula: ", deparse(f, width.cutoff = 500))
+  m <- tryCatch(if (kind == "ordinal") clmm(f, data = d) else glmer(f, data = d, family = binomial, control = glmerControl(optimizer = "bobyqa")),
+                error = function(e) { say("Model failed: ", conditionMessage(e)); NULL })
+  if (is.null(m)) return(invisible(NULL))
+  say("N observations = ", nrow(d), " | participants = ", nlevels(d$participant), " | videos = ", nlevels(d$video))
+  show(joint_tests(m))
+  for (f0 in intersect(c("level", "model", "dimension", "agent_gender", "transcript_gender", "task"), terms)) {
+    e <- emmeans(m, as.formula(paste("~", f0)), type = "response", mode = if (kind == "ordinal") "mean.class" else NULL)
+    say(if (kind == "ordinal") "Estimated mean response (1-3): " else "Estimated probability of following: ", f0); show(summary(e))
+    if (nlevels(d[[f0]]) > 2) show(pairs(e, adjust = "tukey"))
+  }
+  invisible(m)
 }
+fit_other("trustworthiness_3pt", D, FIXED_BOTH, "3-POINT ITEM (ability on QA, benevolence on Nav): ordinal mixed model", "ordinal")
+fit_other("ability_3pt", D[D$task == "QA", ], FIXED_ONE, "3-POINT ABILITY ITEM, QA videos: ordinal mixed model", "ordinal")
+fit_other("benevolence_3pt", D[D$task == "Nav", ], FIXED_ONE, "3-POINT BENEVOLENCE ITEM, Nav videos: ordinal mixed model", "ordinal")
+fit_other("followed", D, FIXED_BOTH, "FOLLOWING THE AGENT'S RECOMMENDATION (behavioural trust): logistic mixed model", "binomial")
+for (tk in levels(D$task)) fit_other("followed", D[D$task == tk, ], FIXED_ONE, paste0("FOLLOWING THE AGENT'S RECOMMENDATION, ", tk, " videos: logistic mixed model"), "binomial")
 
 # =====================================================================================================
 # 7. COMPLEMENTARY REPEATED-MEASURES ANOVA (by-participant means)
