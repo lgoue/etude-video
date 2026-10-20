@@ -123,7 +123,9 @@ read_export <- function(file, study) {
   # ---- Videos (attention checks removed)
   r <- raw[!lgl(raw$attention), ]
   D <- data.frame(
-    study = study, participant = paste0(study, "_", r$participant), session_id = r$session_id, video = r$video_name, pos = num(r$pos), part = r$part,
+    # Videos are identified by their link: several videos share the same name in the video list
+    study = study, participant = paste0(study, "_", r$participant), session_id = r$session_id,
+    video = ifelse(is.na(r$yt) | r$yt == "", r$video_name, sub("/download/?$", "", r$yt)), video_name = r$video_name, pos = num(r$pos), part = r$part,
     task = r$task, dimension = r$dimension, level = r$ability, model = r$model, agent_gender = r$gender, transcript_gender = r$transcript,
     question_no = r$question_no, transcript_no = r$transcript_no,
     abil_1 = pick("confident about the virtual character's knowledge", r), abil_2 = pick("very capable of indicating", r), ability_3pt = pick("assess the character.s ability", r),
@@ -221,8 +223,8 @@ pm <- function(dv, by, data = D) {
   s <- aggregate(a$x, a[by], function(x) c(mean = mean(x), se = sd(x) / sqrt(length(x)), n = length(x)))
   cbind(s[by], round(as.data.frame(s$x), 3))
 }
-DVS <- c(trustworthiness = "Perceived trustworthiness, 2-item score (ability on QA, benevolence on Nav), 1-7",
-         trustworthiness_3pt = "Perceived trustworthiness, 3-point item (1-3)",
+DVS <- c(ability_score = "Perceived ability, 2-item score (1-7)", benevolence_score = "Perceived benevolence, 2-item score (1-7)",
+         ability_3pt = "Perceived ability, 3-point item (1-3)", benevolence_3pt = "Perceived benevolence, 3-point item (1-3)",
          followed = "Recommendation followed (proportion)",
          trust = "Trust in the agent's advice (1-7)", self_confidence = "Confidence in own answer (1-7)")
 for (dv in names(DVS)) {
@@ -232,10 +234,10 @@ for (dv in names(DVS)) {
 
 save_plot <- function(p, name, w = 8, h = 5) suppressMessages(ggsave(file.path(OUT, name), p, width = w, height = h, dpi = 150))
 for (dv in names(DVS)) {
-  p1 <- pm(dv, c("study", "task", "dimension", "level", "model"))
+  p1 <- pm(dv, c("task", "dimension", "level", "model"))
   if (nrow(p1)) save_plot(ggplot(p1, aes(level, mean, colour = model, group = model)) + geom_point(position = position_dodge(.3)) +
       geom_line(position = position_dodge(.3)) + geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = .15, position = position_dodge(.3)) +
-      facet_grid(study + task ~ dimension) + labs(x = "Level", y = DVS[[dv]], colour = "Model") + theme_minimal(), paste0("fig_", dv, "_level_model.png"), 9, 3 + 2 * nlevels(D$study))
+      facet_grid(task ~ dimension, labeller = labeller(dimension = function(x) paste(x, "manipulated"))) + labs(x = "Level", y = DVS[[dv]], colour = "Model") + theme_minimal(), paste0("fig_", dv, "_level_model.png"), 9, 6)
   p2 <- pm(dv, c("agent_gender", "transcript_gender"))
   if (nrow(p2)) save_plot(ggplot(p2, aes(transcript_gender, mean, colour = agent_gender, group = agent_gender)) + geom_point(position = position_dodge(.3)) +
       geom_line(position = position_dodge(.3)) + geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = .15, position = position_dodge(.3)) +
@@ -292,7 +294,7 @@ m_trust <- fit_lmm("trust", D, FIXED_BOTH, "trust in the agent's advice (1-7)")
 m_conf  <- fit_lmm("self_confidence", D, FIXED_BOTH, "confidence in own answer (1-7)")
 
 # Exploratory moderation by participants' gender stereotypes and attitude toward AI
-if (length(mods)) for (dv in c("trustworthiness", "trust")) {
+if (length(mods)) for (dv in c("ability_score", "benevolence_score", "trust")) {
   fit_lmm(dv, D, c(FIXED_BOTH, mods, if ("stereotype_index" %in% mods) c("agent_gender:stereotype_index", "agent_gender:transcript_gender:stereotype_index")),
           paste0(dv, " - exploratory moderation by ", paste(mods, collapse = " and ")))
 }
@@ -330,7 +332,9 @@ for (tk in levels(D$task)) fit_other("followed", D[D$task == tk, ], FIXED_ONE, p
 # =====================================================================================================
 # Ignores video-to-video variability, so its p-values are too liberal with this design: report it only as a complement.
 title("7. COMPLEMENTARY RM-ANOVA (participant means; liberal, see comment in script)")
-for (spec in list(list(dv = "trustworthiness", w = c("level", "model")), list(dv = "trustworthiness", w = c("agent_gender", "transcript_gender")))) {
+SPECS <- list(list(dv = "ability_score", w = c("level", "model")), list(dv = "ability_score", w = c("agent_gender", "transcript_gender")),
+              list(dv = "benevolence_score", w = c("level", "model")), list(dv = "benevolence_score", w = c("agent_gender", "transcript_gender")))
+for (spec in SPECS) {
   d <- droplevels(D[!is.na(D[[spec$dv]]), ])
   tab <- table(d$participant, interaction(d[spec$w], drop = TRUE))
   ok <- rownames(tab)[apply(tab > 0, 1, all)]                     # only participants who saw every cell
@@ -348,7 +352,7 @@ for (spec in list(list(dv = "trustworthiness", w = c("level", "model")), list(dv
 # Each video is rated on ability in one study and on benevolence in the other (S1: ability after QA, benevolence after Nav;
 # S2: the reverse), always with the two 7-point items. Here the two ratings are put side by side, one row per video.
 title("8. ABILITY AND BENEVOLENCE RATINGS OF EACH VIDEO (2-item 7-point scores)")
-vkey <- c("video", "task", "dimension", "level", "model", "agent_gender", "transcript_gender", "transcript_no")
+vkey <- c("video", "video_name", "task", "dimension", "level", "model", "agent_gender", "transcript_gender", "transcript_no")
 # Grouping columns as text, with empty values kept as "" (aggregate() would otherwise drop every row where one of them is missing)
 VK <- as.data.frame(lapply(D[vkey], function(x) { x <- as.character(x); x[is.na(x)] <- ""; x }), stringsAsFactors = FALSE)
 vmean <- function(dv) { ok <- !is.na(D[[dv]]); if (!any(ok)) return(NULL)
@@ -378,6 +382,21 @@ title("8b. MANIPULATION CHECK: rated dimension x manipulated dimension x level (
 DL <- D[!is.na(D$trustworthiness), ]; DL$rated <- DL$measured
 mc <- tryCatch(lmer(trustworthiness ~ rated * dimension * level + model + agent_gender * transcript_gender + task + (1 | participant) + (1 | video), data = DL),
                error = function(e) { say("Model failed: ", conditionMessage(e)); NULL })
+# Figure: each rating (ability, benevolence) by level, for videos manipulating ability and for videos manipulating benevolence.
+# The off-target panels show e.g. ability ratings when benevolence is manipulated.
+DL$rated_dimension <- factor(paste(DL$rated, "rating"), levels = c("Ability rating", "Benevolence rating"))
+DL$manipulated <- factor(paste(DL$dimension, "manipulated"))
+cross <- pm("trustworthiness", c("manipulated", "level", "rated_dimension"), DL)
+if (nrow(cross)) save_plot(ggplot(cross, aes(level, mean, colour = rated_dimension, group = rated_dimension)) + geom_point(position = position_dodge(.25), size = 2) +
+    geom_line(position = position_dodge(.25)) + geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = .15, position = position_dodge(.25)) +
+    facet_wrap(~ manipulated) + labs(x = "Level of the manipulated dimension", y = "Mean rating (2-item score, 1-7)", colour = NULL) +
+    theme_minimal() + theme(legend.position = "bottom"), "fig_cross_ratings.png", 8, 4.5)
+cross_t <- pm("trustworthiness", c("task", "manipulated", "level", "rated_dimension"), DL)
+if (nrow(cross_t)) save_plot(ggplot(cross_t, aes(level, mean, colour = rated_dimension, group = rated_dimension)) + geom_point(position = position_dodge(.25), size = 2) +
+    geom_line(position = position_dodge(.25)) + geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = .15, position = position_dodge(.25)) +
+    facet_grid(task ~ manipulated) + labs(x = "Level of the manipulated dimension", y = "Mean rating (2-item score, 1-7)", colour = NULL) +
+    theme_minimal() + theme(legend.position = "bottom"), "fig_cross_ratings_by_task.png", 8, 7)
+say("Ratings by manipulated dimension, level and rated dimension (means of participant means; see fig_cross_ratings.png):"); show(cross)
 if (!is.null(mc) && nlevels(droplevels(DL$participant)) >= 3) {
   say("N observations = ", nobs(mc)); show(anova(mc, type = 3))
   say("Effect of level within each rated x manipulated dimension:"); show(pairs(emmeans(mc, ~ level | rated * dimension), adjust = "tukey"))
