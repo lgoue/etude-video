@@ -1,0 +1,5 @@
+"N_per_study","N_total","scenario","d","b","score_level","score_level:dimension","score_model","score_level:model","score_agent_gender","score_transcript_gender","score_agent_gender:transcript_gender","score_task","pairs_same_transcript","followed_level","followed_model","followed_agent_gender","followed_transcript_gender","followed_agent_gender:transcript_gender","followed_task","transcripts_paired","ratings_per_video","n_ok"
+108,216,"none",0,0,0.033,0.047,0.047,0.06,0.12,0.053,0.04,0.06,0.073,0.067,0.067,0.067,0.047,0.067,0.073,434,4.5,150
+108,216,"small",0.2,0.2,1,0.607,0.993,0.38,1,0.993,0.58,0.707,1,1,0.78,0.967,0.767,0.293,0.987,434,4.5,150
+108,216,"medium",0.35,0.4,1,0.973,1,0.827,1,1,0.947,0.993,1,1,1,1,1,0.773,1,434,4.5,150
+108,216,"medium+",0.5,0.6,1,1,1,0.987,1,1,1,1,1,1,1,1,1,0.993,1,434,4.5,150
