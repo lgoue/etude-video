@@ -35,8 +35,9 @@ if (!is.na(VIDEO_LIST)) {
   # Real list of videos
   vl <- read.csv(text = sub("^\ufeff", "", readLines(VIDEO_LIST, encoding = "UTF-8", warn = FALSE)), check.names = FALSE, stringsAsFactors = FALSE, colClasses = "character")
   pool <- data.frame(video_name = vl$Nom, ability = vl$Niveau, gender = vl[["Genre Agent"]], task = vl$Tache, transcript = vl[["Genre Transcript"]],
-                     dimension = vl[["Dimension manipulated"]], transcript_no = vl$Transcript, model = vl$Modele, question_no = vl$NQuestion,
+                     dimension = vl[[intersect(c("Dimension manipulated", "Dimension"), names(vl))[1]]], transcript_no = vl$Transcript, model = vl$Modele, question_no = vl$NQuestion,
                      yt = paste0("video-", seq_len(nrow(vl))), stringsAsFactors = FALSE)
+  pool$dimension[pool$dimension %in% c("Abilité", "Abilite", "ability")] <- "Ability"   # spelling variants in the sheet
   traps <- pool[pool$ability == "Attention", ]; pool <- pool[pool$ability != "Attention", ]
 } else {
   # Made-up pool: 3 videos per combination dimension x level x model x agent gender x transcript gender, for each task

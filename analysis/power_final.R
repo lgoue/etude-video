@@ -30,7 +30,8 @@ set.seed(2027)
 
 vl <- read.csv(text = sub("^﻿", "", readLines(args[1], encoding = "UTF-8", warn = FALSE)), check.names = FALSE, stringsAsFactors = FALSE, colClasses = "character")
 pool <- data.frame(level = vl$Niveau, agent_gender = vl[["Genre Agent"]], task = vl$Tache, transcript_gender = vl[["Genre Transcript"]],
-                   dimension = vl[["Dimension manipulated"]], transcript_no = vl$Transcript, model = vl$Modele, stringsAsFactors = FALSE)
+                   dimension = vl[[intersect(c("Dimension manipulated", "Dimension"), names(vl))[1]]], transcript_no = vl$Transcript, model = vl$Modele, stringsAsFactors = FALSE)
+pool$dimension[pool$dimension %in% c("Abilité", "Abilite", "ability")] <- "Ability"   # spelling variants in the sheet
 pool <- pool[pool$level != "Attention", ]
 pool$video <- seq_len(nrow(pool)); pool$model_level <- paste(pool$model, pool$level)
 FEATS <- c("level", "model", "model_level", "agent_gender", "transcript_gender", "dimension")
