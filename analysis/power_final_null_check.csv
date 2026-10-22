@@ -1,0 +1,16 @@
+"test","false_positive_rate"
+"score_level",0.06
+"score_level:dimension",0.027
+"score_model",0.053
+"score_level:model",0.053
+"score_agent_gender",0.043
+"score_transcript_gender",0.053
+"score_agent_gender:transcript_gender",0.06
+"score_task",0.05
+"pairs_same_transcript",0.037
+"followed_level",0.067
+"followed_model",0.067
+"followed_agent_gender",0.057
+"followed_transcript_gender",0.04
+"followed_agent_gender:transcript_gender",0.073
+"followed_task",0.06
